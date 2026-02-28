@@ -142,13 +142,15 @@ body {
 /* ===== Hamburger Menu - Mobile Responsive ===== */
 .navbar-toggler {
     padding: 0.5rem 0.75rem !important;
-    border: 1px solid rgba(255, 255, 255, 0.2) !important;
+    border: 2px solid white !important;
     border-radius: var(--radius);
-    background-color: rgba(255, 255, 255, 0.1);
+    background-color: rgba(255, 255, 255, 0.15);
 }
 
+.navbar-toggler:hover,
 .navbar-toggler:focus {
-    box-shadow: 0 0 0 0.25rem rgba(255, 255, 255, 0.25) !important;
+    background-color: rgba(255, 255, 255, 0.25) !important;
+    box-shadow: 0 0 0 0.25rem rgba(255, 255, 255, 0.3) !important;
     outline: none;
 }
 
@@ -1613,12 +1615,14 @@ h2.mb-4 i {
 }
 
 [data-theme="dark"] .navbar-toggler {
-    border-color: rgba(225, 225, 225, 0.2) !important;
-    background-color: rgba(225, 225, 225, 0.05);
+    border-color: white !important;
+    background-color: rgba(255, 255, 255, 0.1);
 }
 
+[data-theme="dark"] .navbar-toggler:hover,
 [data-theme="dark"] .navbar-toggler:focus {
-    box-shadow: 0 0 0 0.25rem rgba(225, 225, 225, 0.15) !important;
+    background-color: rgba(255, 255, 255, 0.15) !important;
+    box-shadow: 0 0 0 0.25rem rgba(255, 255, 255, 0.2) !important;
 }
 
 [data-theme="dark"] .navbar-toggler-icon {
