@@ -22,7 +22,7 @@ require_once __DIR__ . '/upi_helper.php';
 <body>
     <?php if(isLoggedIn() && basename($_SERVER['PHP_SELF']) != 'login.php'): ?>
     <!-- Navigation Bar -->
-    <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
+    <nav class="navbar navbar-expand-md navbar-dark bg-primary">
         <div class="container-fluid">
             <a class="navbar-brand" href="/admin/dashboard.php">
                 <?php if (!empty($siteSettings['school_logo']) && file_exists($_SERVER['DOCUMENT_ROOT'] . '/' . $siteSettings['school_logo'])): ?>
@@ -32,7 +32,7 @@ require_once __DIR__ . '/upi_helper.php';
                 <?php endif; ?>
                 <?php echo htmlspecialchars($siteSettings['school_name']); ?>
             </a>
-            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav" aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
                 <span class="navbar-toggler-icon"></span>
             </button>
             <div class="collapse navbar-collapse" id="navbarNav">

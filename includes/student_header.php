@@ -20,7 +20,7 @@
 <body>
     <?php if(isStudentLoggedIn() && basename($_SERVER['PHP_SELF']) != 'login.php'): ?>
     <!-- Student Portal Navigation Bar -->
-    <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
+    <nav class="navbar navbar-expand-md navbar-dark bg-primary">
         <div class="container-fluid">
             <a class="navbar-brand" href="/student/dashboard.php">
                 <?php if (!empty($siteSettings['school_logo']) && file_exists($_SERVER['DOCUMENT_ROOT'] . '/' . $siteSettings['school_logo'])): ?>
@@ -31,7 +31,7 @@
                 <?php echo htmlspecialchars($siteSettings['school_name']); ?>
                 <span class="student-portal-label">Student Portal</span>
             </a>
-            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#studentNavbarNav">
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#studentNavbarNav" aria-controls="studentNavbarNav" aria-expanded="false" aria-label="Toggle navigation">
                 <span class="navbar-toggler-icon"></span>
             </button>
             <div class="collapse navbar-collapse" id="studentNavbarNav">
