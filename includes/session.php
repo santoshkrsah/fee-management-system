@@ -1,0 +1,701 @@
+<?php
+/**
+ * Enhanced Session Management with Security Features
+ * Includes: Timeout, Hijacking Protection, Activity Logging
+ */
+
+// Include database functions if not already included
+if (!function_exists('getDB')) {
+    require_once __DIR__ . '/../config/database.php';
+}
+
+// Configure session settings
+ini_set('session.cookie_httponly', 1);
+ini_set('session.use_only_cookies', 1);
+ini_set('session.cookie_samesite', 'Strict');
+ini_set('session.gc_maxlifetime', 1800); // 30 minutes
+
+// Session timeout: 30 minutes of inactivity
+define('SESSION_TIMEOUT', 1800);
+
+// Start secure session
+if (session_status() === PHP_SESSION_NONE) {
+    $isHTTPS = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ||
+               ($_SERVER['SERVER_PORT'] == 443);
+
+    session_start([
+        'cookie_httponly' => true,
+        'cookie_secure' => $isHTTPS, // Auto-detect HTTPS
+        'cookie_samesite' => 'Strict',
+        'use_strict_mode' => true
+    ]);
+}
+
+// Check session timeout
+if (isLoggedIn()) {
+    $inactive = time() - ($_SESSION['last_activity'] ?? time());
+
+    if ($inactive > SESSION_TIMEOUT) {
+        logAudit(getAdminId(), 'SESSION_TIMEOUT', 'session', null, null, null);
+        logout('Your session has expired. Please login again.');
+    }
+
+    // Update last activity time
+    $_SESSION['last_activity'] = time();
+
+    // Session hijacking protection
+    validateSessionSecurity();
+}
+
+/**
+ * Validate session against hijacking
+ */
+function validateSessionSecurity() {
+    $userAgent = $_SERVER['HTTP_USER_AGENT'] ?? '';
+    $ipAddress = getRealIPAddress();
+
+    // First time - store fingerprint
+    if (!isset($_SESSION['fingerprint'])) {
+        $_SESSION['fingerprint'] = generateSessionFingerprint($userAgent, $ipAddress);
+        return;
+    }
+
+    // Validate fingerprint
+    $currentFingerprint = generateSessionFingerprint($userAgent, $ipAddress);
+
+    if ($_SESSION['fingerprint'] !== $currentFingerprint) {
+        logAudit(getAdminId(), 'SESSION_HIJACK_ATTEMPT', 'session', null, null, null);
+        logout('Security alert: Your session has been invalidated.');
+    }
+}
+
+/**
+ * Generate session fingerprint for hijacking protection
+ */
+function generateSessionFingerprint($userAgent, $ipAddress) {
+    // Use hash of user agent + first 3 octets of IP
+    // (IP can change slightly in some networks, so we use first 3 octets)
+    $ipParts = explode('.', $ipAddress);
+    $ipPrefix = implode('.', array_slice($ipParts, 0, 3));
+
+    return hash('sha256', $userAgent . $ipPrefix . 'FEE_MGMT_SALT_2026');
+}
+
+/**
+ * Check if user is logged in
+ * @return bool
+ */
+function isLoggedIn() {
+    return isset($_SESSION['admin_id']) && isset($_SESSION['logged_in']) && $_SESSION['logged_in'] === true;
+}
+
+/**
+ * Require login - redirect to login page if not logged in
+ */
+function requireLogin() {
+    if (!isLoggedIn()) {
+        header("Location: /admin/login.php");
+        exit();
+    }
+}
+
+/**
+ * Get current admin ID
+ * @return int|null
+ */
+function getAdminId() {
+    return $_SESSION['admin_id'] ?? null;
+}
+
+/**
+ * Get current admin username
+ * @return string|null
+ */
+function getAdminUsername() {
+    return $_SESSION['username'] ?? null;
+}
+
+/**
+ * Get current admin full name
+ * @return string|null
+ */
+function getAdminName() {
+    return $_SESSION['full_name'] ?? null;
+}
+
+/**
+ * Set session data after login
+ * @param array $adminData
+ */
+function setAdminSession($adminData) {
+    $_SESSION['admin_id'] = $adminData['admin_id'];
+    $_SESSION['username'] = $adminData['username'];
+    $_SESSION['full_name'] = $adminData['full_name'];
+    $_SESSION['email'] = $adminData['email'];
+    $_SESSION['role'] = $adminData['role'];
+    $_SESSION['logged_in'] = true;
+    $_SESSION['login_time'] = time();
+    $_SESSION['last_activity'] = time();
+
+    // Generate fingerprint
+    $_SESSION['fingerprint'] = generateSessionFingerprint(
+        $_SERVER['HTTP_USER_AGENT'] ?? '',
+        getRealIPAddress()
+    );
+
+    // Regenerate session ID to prevent fixation attacks
+    session_regenerate_id(true);
+
+    // Store session ID in database for concurrent session prevention
+    $sessionId = session_id();
+    try {
+        $db = getDB();
+        $db->query("UPDATE admin SET session_id = :session_id, last_login = NOW(),
+                    failed_login_attempts = 0, account_locked_until = NULL
+                    WHERE admin_id = :admin_id", [
+            'session_id' => $sessionId,
+            'admin_id' => $adminData['admin_id']
+        ]);
+    } catch (Exception $e) {
+        error_log("Failed to update session_id: " . $e->getMessage());
+    }
+
+    // Log successful login
+    logAudit($adminData['admin_id'], 'LOGIN_SUCCESS', 'admin', $adminData['admin_id'], null, null);
+}
+
+/**
+ * Destroy session and logout
+ * @param string $message Optional logout message
+ */
+function logout($message = null) {
+    // Log logout
+    if (isLoggedIn()) {
+        logAudit(getAdminId(), 'LOGOUT', 'admin', getAdminId(), null, null);
+
+        // Clear session ID from database
+        try {
+            $db = getDB();
+            $db->query("UPDATE admin SET session_id = NULL WHERE admin_id = :admin_id", [
+                'admin_id' => getAdminId()
+            ]);
+        } catch (Exception $e) {
+            error_log("Failed to clear session_id: " . $e->getMessage());
+        }
+    }
+
+    $_SESSION = [];
+
+    if (ini_get("session.use_cookies")) {
+        $params = session_get_cookie_params();
+        setcookie(session_name(), '', time() - 42000,
+            $params["path"], $params["domain"],
+            $params["secure"], $params["httponly"]
+        );
+    }
+
+    session_destroy();
+
+    if ($message) {
+        session_start();
+        setFlashMessage('info', $message);
+    }
+
+    header("Location: /admin/login.php");
+    exit();
+}
+
+/**
+ * Sanitize input data
+ * @param string $data
+ * @return string
+ */
+function sanitize($data) {
+    $data = trim($data);
+    $data = stripslashes($data);
+    $data = htmlspecialchars($data, ENT_QUOTES, 'UTF-8');
+    return $data;
+}
+
+/**
+ * Validate email
+ * @param string $email
+ * @return bool
+ */
+function isValidEmail($email) {
+    return filter_var($email, FILTER_VALIDATE_EMAIL) !== false;
+}
+
+/**
+ * Validate phone number
+ * @param string $phone
+ * @return bool
+ */
+function isValidPhone($phone) {
+    return preg_match('/^[0-9]{10,15}$/', $phone);
+}
+
+/**
+ * Generate unique receipt number
+ * @return string
+ */
+function generateReceiptNo() {
+    return 'RCPT' . date('Ymd') . rand(1000, 9999);
+}
+
+/**
+ * Format currency
+ * @param float $amount
+ * @return string
+ */
+function formatCurrency($amount) {
+    return '₹ ' . number_format($amount, 2);
+}
+
+/**
+ * Format date
+ * @param string $date
+ * @param string $format
+ * @return string
+ */
+function formatDate($date, $format = 'd-m-Y') {
+    return date($format, strtotime($date));
+}
+
+/**
+ * Generate CSRF token
+ * @return string
+ */
+function generateCSRFToken() {
+    if (empty($_SESSION['csrf_token'])) {
+        $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+    }
+    return $_SESSION['csrf_token'];
+}
+
+/**
+ * Verify CSRF token
+ * @param string $token
+ * @return bool
+ */
+function verifyCSRFToken($token) {
+    return isset($_SESSION['csrf_token']) && hash_equals($_SESSION['csrf_token'], $token);
+}
+
+/**
+ * Set flash message
+ * @param string $type (success, error, warning, info)
+ * @param string $message
+ */
+function setFlashMessage($type, $message) {
+    $_SESSION['flash_message'] = [
+        'type' => $type,
+        'message' => $message
+    ];
+}
+
+/**
+ * Get and clear flash message
+ * @return array|null
+ */
+function getFlashMessage() {
+    if (isset($_SESSION['flash_message'])) {
+        $message = $_SESSION['flash_message'];
+        unset($_SESSION['flash_message']);
+        return $message;
+    }
+    return null;
+}
+
+/**
+ * Redirect with message
+ * @param string $url
+ * @param string $type
+ * @param string $message
+ */
+function redirectWithMessage($url, $type, $message) {
+    setFlashMessage($type, $message);
+    header("Location: " . $url);
+    exit();
+}
+
+/**
+ * Get current admin role
+ * @return string|null
+ */
+function getAdminRole() {
+    return $_SESSION['role'] ?? null;
+}
+
+/**
+ * Check if current user is System Administrator
+ * @return bool
+ */
+function isSysAdmin() {
+    return getAdminRole() === 'sysadmin';
+}
+
+/**
+ * Check if current user is Administrator
+ * @return bool
+ */
+function isAdmin() {
+    return getAdminRole() === 'admin';
+}
+
+/**
+ * Check if current user is Staff (operator role)
+ * @return bool
+ */
+function isOperator() {
+    return getAdminRole() === 'operator';
+}
+
+/**
+ * Check if current user can edit records (sysadmin or admin)
+ * @return bool
+ */
+function canEdit() {
+    return isSysAdmin() || isAdmin();
+}
+
+/**
+ * Check if current user can delete records (sysadmin only)
+ * @return bool
+ */
+function canDelete() {
+    return isSysAdmin();
+}
+
+/**
+ * Require specific role(s) - redirect if not authorized
+ * @param array $roles Allowed roles
+ */
+function requireRole($roles) {
+    requireLogin();
+    if (!in_array(getAdminRole(), $roles)) {
+        redirectWithMessage('/admin/dashboard.php', 'error', 'You do not have permission to access this page.');
+    }
+}
+
+/**
+ * Get system settings from database (cached per request)
+ * @return array
+ */
+function getSettings() {
+    static $settings = null;
+    if ($settings === null) {
+        try {
+            $db = getDB();
+            $rows = $db->fetchAll("SELECT setting_key, setting_value FROM settings");
+            $settings = [];
+            foreach ($rows as $row) {
+                $settings[$row['setting_key']] = $row['setting_value'];
+            }
+        } catch (Exception $e) {
+            $settings = [
+                'school_name' => 'Fee Management System',
+                'school_address' => '',
+                'school_phone' => '',
+                'school_email' => '',
+                'school_logo' => ''
+            ];
+        }
+    }
+    return $settings;
+}
+
+/**
+ * Get active academic session (cached per request)
+ * @return array|null
+ */
+function getActiveSession() {
+    static $session = null;
+    if ($session === null) {
+        try {
+            $db = getDB();
+            $session = $db->fetchOne("SELECT * FROM academic_sessions WHERE is_active = 1 LIMIT 1");
+            if (!$session) {
+                $session = false;
+            }
+        } catch (Exception $e) {
+            $session = false;
+        }
+    }
+    return $session ?: null;
+}
+
+/**
+ * Get active academic session name (e.g. '2026-2027')
+ * @return string
+ */
+function getActiveSessionName() {
+    $session = getActiveSession();
+    if ($session) {
+        return $session['session_name'];
+    }
+    // Fallback to computed year if no active session in DB
+    return date('Y') . '-' . (date('Y') + 1);
+}
+
+/**
+ * Get all academic sessions
+ * @return array
+ */
+function getAllSessions() {
+    static $sessions = null;
+    if ($sessions === null) {
+        try {
+            $db = getDB();
+            $sessions = $db->fetchAll("SELECT * FROM academic_sessions ORDER BY session_name DESC");
+        } catch (Exception $e) {
+            $sessions = [];
+        }
+    }
+    return $sessions;
+}
+
+/**
+ * Get the currently selected session name from PHP session.
+ * Falls back to the active session if none is selected.
+ * @return string
+ */
+function getSelectedSession() {
+    if (!empty($_SESSION['selected_session'])) {
+        return $_SESSION['selected_session'];
+    }
+    return getActiveSessionName();
+}
+
+/**
+ * Set the selected session in PHP session.
+ * @param string $sessionName
+ */
+function setSelectedSession($sessionName) {
+    $_SESSION['selected_session'] = $sessionName;
+}
+
+/**
+ * Get current fee mode ('annual' or 'monthly')
+ * @return string
+ */
+function getFeeMode() {
+    $settings = getSettings();
+    return $settings['fee_mode'] ?? 'annual';
+}
+
+/**
+ * Check if system is in monthly fee mode
+ * @return bool
+ */
+function isMonthlyFeeMode() {
+    return getFeeMode() === 'monthly';
+}
+
+/**
+ * Get ordered list of academic months (April-March, Indian academic year)
+ * @return array
+ */
+function getAcademicMonths() {
+    return [
+        1  => 'April',
+        2  => 'May',
+        3  => 'June',
+        4  => 'July',
+        5  => 'August',
+        6  => 'September',
+        7  => 'October',
+        8  => 'November',
+        9  => 'December',
+        10 => 'January',
+        11 => 'February',
+        12 => 'March'
+    ];
+}
+
+/**
+ * Log an audit trail entry
+ * @param int $userId User who performed the action
+ * @param string $action Action performed (e.g., 'CREATE_STUDENT', 'DELETE_PAYMENT')
+ * @param string $tableName Table affected
+ * @param int $recordId Record ID affected
+ * @param array $oldValues Old values (for updates)
+ * @param array $newValues New values (for creates/updates)
+ */
+function logAudit($userId, $action, $tableName = null, $recordId = null, $oldValues = null, $newValues = null) {
+    try {
+        $db = getDB();
+
+        $username = null;
+        if ($userId) {
+            $user = $db->fetchOne("SELECT username FROM admin WHERE admin_id = ?", [$userId]);
+            $username = $user['username'] ?? null;
+        }
+
+        $db->query("INSERT INTO audit_log
+                   (user_id, username, action, table_name, record_id, old_values, new_values, ip_address, user_agent)
+                   VALUES (:user_id, :username, :action, :table_name, :record_id, :old_values, :new_values, :ip_address, :user_agent)",
+                   [
+                       'user_id' => $userId,
+                       'username' => $username,
+                       'action' => $action,
+                       'table_name' => $tableName,
+                       'record_id' => $recordId,
+                       'old_values' => $oldValues ? json_encode($oldValues) : null,
+                       'new_values' => $newValues ? json_encode($newValues) : null,
+                       'ip_address' => getRealIPAddress(),
+                       'user_agent' => substr($_SERVER['HTTP_USER_AGENT'] ?? '', 0, 255)
+                   ]);
+    } catch (Exception $e) {
+        error_log("Audit log failed: " . $e->getMessage());
+    }
+}
+
+/**
+ * Check login rate limiting
+ * @param string $username
+ * @return array ['allowed' => bool, 'message' => string, 'wait_time' => int]
+ */
+function checkLoginRateLimit($username) {
+    try {
+        $db = getDB();
+        $ipAddress = getRealIPAddress();
+
+        // Check failed attempts in last 60 minutes
+        $attempts = $db->fetchOne(
+            "SELECT COUNT(*) as count FROM login_attempts
+             WHERE (username = :username OR ip_address = :ip)
+             AND success = 0
+             AND attempted_at > DATE_SUB(NOW(), INTERVAL 60 MINUTE)",
+            ['username' => $username, 'ip' => $ipAddress]
+        );
+
+        $failedCount = $attempts['count'] ?? 0;
+
+        // Max 5 attempts in 60 minutes
+        if ($failedCount >= 5) {
+            // Check when they can try again
+            $lastAttempt = $db->fetchOne(
+                "SELECT attempted_at FROM login_attempts
+                 WHERE (username = :username OR ip_address = :ip)
+                 AND success = 0
+                 ORDER BY attempted_at DESC LIMIT 1",
+                ['username' => $username, 'ip' => $ipAddress]
+            );
+
+            if ($lastAttempt) {
+                // Calculate remaining wait time using MySQL TIMESTAMPDIFF to avoid timezone issues
+                $timeCheck = $db->fetchOne(
+                    "SELECT TIMESTAMPDIFF(SECOND, :last_attempt, NOW()) as elapsed_seconds",
+                    ['last_attempt' => $lastAttempt['attempted_at']]
+                );
+
+                $elapsedSeconds = $timeCheck['elapsed_seconds'] ?? 0;
+                $waitTime = 3600 - $elapsedSeconds; // 60 minutes (3600 seconds)
+                $minutes = max(1, ceil($waitTime / 60)); // At least 1 minute
+
+                return [
+                    'allowed' => false,
+                    'message' => "Too many failed attempts. Please try again in $minutes minutes.",
+                    'wait_time' => $waitTime
+                ];
+            }
+        }
+
+        return ['allowed' => true, 'message' => '', 'wait_time' => 0];
+
+    } catch (Exception $e) {
+        error_log("Rate limit check failed: " . $e->getMessage());
+        return ['allowed' => true, 'message' => '', 'wait_time' => 0]; // Fail open
+    }
+}
+
+/**
+ * Log login attempt
+ * @param string $username
+ * @param bool $success
+ */
+function logLoginAttempt($username, $success) {
+    try {
+        $db = getDB();
+        $db->query(
+            "INSERT INTO login_attempts (username, ip_address, success, user_agent)
+             VALUES (:username, :ip_address, :success, :user_agent)",
+            [
+                'username' => $username,
+                'ip_address' => getRealIPAddress(),
+                'success' => $success ? 1 : 0,
+                'user_agent' => substr($_SERVER['HTTP_USER_AGENT'] ?? '', 0, 255)
+            ]
+        );
+    } catch (Exception $e) {
+        error_log("Login attempt log failed: " . $e->getMessage());
+    }
+}
+
+/**
+ * Get real IP address (handles proxies)
+ * @return string
+ */
+function getRealIPAddress() {
+    if (!empty($_SERVER['HTTP_CLIENT_IP'])) {
+        $ip = $_SERVER['HTTP_CLIENT_IP'];
+    } elseif (!empty($_SERVER['HTTP_X_FORWARDED_FOR'])) {
+        $ip = $_SERVER['HTTP_X_FORWARDED_FOR'];
+    } else {
+        $ip = $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0';
+    }
+
+    // If multiple IPs (proxy chain), get the first one
+    if (strpos($ip, ',') !== false) {
+        $ip = trim(explode(',', $ip)[0]);
+    }
+
+    // Validate IP
+    if (filter_var($ip, FILTER_VALIDATE_IP)) {
+        return $ip;
+    }
+
+    return '0.0.0.0';
+}
+
+/**
+ * Validate password strength
+ * @param string $password
+ * @return array ['valid' => bool, 'message' => string]
+ */
+function validatePasswordStrength($password) {
+    $errors = [];
+
+    // Minimum 8 characters
+    if (strlen($password) < 8) {
+        $errors[] = "Password must be at least 8 characters long";
+    }
+
+    // Must contain uppercase
+    if (!preg_match('/[A-Z]/', $password)) {
+        $errors[] = "Password must contain at least one uppercase letter";
+    }
+
+    // Must contain lowercase
+    if (!preg_match('/[a-z]/', $password)) {
+        $errors[] = "Password must contain at least one lowercase letter";
+    }
+
+    // Must contain number
+    if (!preg_match('/[0-9]/', $password)) {
+        $errors[] = "Password must contain at least one number";
+    }
+
+    // Must contain special character
+    if (!preg_match('/[^A-Za-z0-9]/', $password)) {
+        $errors[] = "Password must contain at least one special character (!@#$%^&*)";
+    }
+
+    if (empty($errors)) {
+        return ['valid' => true, 'message' => ''];
+    }
+
+    return ['valid' => false, 'message' => implode('. ', $errors)];
+}
+?>
