@@ -8,9 +8,9 @@
 // HOSTINGER: Update these values with your hPanel MySQL database credentials
 define('DB_HOST', 'localhost');
 define('DB_PORT', '3306');
-define('DB_NAME', 'CHANGE_ME');         // e.g. u123456789_feesystem
-define('DB_USER', 'CHANGE_ME');         // e.g. u123456789_feeadmin
-define('DB_PASS', 'CHANGE_ME');         // Your database password from hPanel
+define('DB_NAME', 'u638211070_demo_fms');
+define('DB_USER', 'u638211070_demo_fms');
+define('DB_PASS', 'Te@5219981998');
 define('DB_CHARSET', 'utf8mb4');
 
 /**
