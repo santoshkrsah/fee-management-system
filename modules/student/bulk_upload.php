@@ -233,11 +233,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                     "INSERT INTO students (
                                         admission_no, first_name, last_name, father_name, mother_name,
                                         date_of_birth, gender, class_id, section_id, roll_number,
-                                        contact_number, email, address, admission_date, academic_year
+                                        contact_number, email, password, address, admission_date, academic_year
                                     ) VALUES (
                                         :admission_no, :first_name, :last_name, :father_name, :mother_name,
                                         :date_of_birth, :gender, :class_id, :section_id, :roll_number,
-                                        :contact_number, :email, :address, :admission_date, :academic_year
+                                        :contact_number, :email, :password, :address, :admission_date, :academic_year
                                     )",
                                     [
                                         'admission_no'  => $admission_no,
@@ -252,6 +252,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                         'roll_number'   => $roll_number,
                                         'contact_number'=> $contact,
                                         'email'         => $email,
+                                        'password'      => password_hash($contact, PASSWORD_BCRYPT, ['cost' => 12]),
                                         'address'       => $address,
                                         'admission_date'=> date('Y-m-d', strtotime($admDate)),
                                         'academic_year' => $selectedSession

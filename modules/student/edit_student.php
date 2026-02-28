@@ -124,6 +124,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'id' => $student_id
         ]);
 
+        // If contact number changed and student hasn't changed their password, update password too
+        if ($contact_number !== $student['contact_number']) {
+            $studentRecord = $db->fetchOne("SELECT password_changed FROM students WHERE student_id = :id", ['id' => $student_id]);
+            if ($studentRecord && !$studentRecord['password_changed']) {
+                $db->query("UPDATE students SET password = :password WHERE student_id = :id", [
+                    'password' => password_hash($contact_number, PASSWORD_BCRYPT, ['cost' => 12]),
+                    'id' => $student_id
+                ]);
+            }
+        }
+
         redirectWithMessage('view_students.php', 'success', 'Student updated successfully!');
 
     } catch(Exception $e) {

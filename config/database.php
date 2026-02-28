@@ -5,13 +5,12 @@
  */
 
 // Database Configuration
-// Auto-detect if running in Docker container
-$isDocker = getenv('DOCKER_ENV') !== false || gethostbyname('db') !== 'db';
-define('DB_HOST', $isDocker ? 'db' : 'localhost');
+// HOSTINGER: Update these values with your hPanel MySQL database credentials
+define('DB_HOST', 'localhost');
 define('DB_PORT', '3306');
-define('DB_NAME', 'fee_management_system');
-define('DB_USER', 'root');
-define('DB_PASS', 'Te@5219981998');
+define('DB_NAME', 'CHANGE_ME');         // e.g. u123456789_feesystem
+define('DB_USER', 'CHANGE_ME');         // e.g. u123456789_feeadmin
+define('DB_PASS', 'CHANGE_ME');         // Your database password from hPanel
 define('DB_CHARSET', 'utf8mb4');
 
 /**
@@ -142,4 +141,9 @@ class Database {
 function getDB() {
     return Database::getInstance();
 }
+
+// Encryption key for sensitive data (UPI ID, etc.)
+// IMPORTANT: Do not share this key. Each deployment should have a unique key.
+define('ENCRYPTION_KEY', 'dJAxXkVyqpTToGPqXsBQ/ia0PBZhnvMaUYQCZammgwM=');
+define('ENCRYPTION_METHOD', 'AES-256-CBC');
 ?>

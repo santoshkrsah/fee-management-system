@@ -47,6 +47,22 @@ if (isLoggedIn()) {
     validateSessionSecurity();
 }
 
+// Check student session timeout
+if (isStudentLoggedIn()) {
+    $studentInactive = time() - ($_SESSION['student_last_activity'] ?? time());
+
+    if ($studentInactive > SESSION_TIMEOUT) {
+        logStudentAudit(getStudentId(), 'STUDENT_SESSION_TIMEOUT', 'students');
+        studentLogout('Your session has expired. Please login again.');
+    }
+
+    // Update last activity time
+    $_SESSION['student_last_activity'] = time();
+
+    // Session hijacking protection
+    validateStudentSessionSecurity();
+}
+
 /**
  * Validate session against hijacking
  */
@@ -660,6 +676,83 @@ function getRealIPAddress() {
 }
 
 /**
+ * Get subscription record from database (cached per request)
+ * @return array|null
+ */
+function getSubscription() {
+    static $sub = null;
+    if ($sub === null) {
+        try {
+            $db = getDB();
+            // Ensure subscription table exists
+            $db->query("CREATE TABLE IF NOT EXISTS subscription (
+                id INT PRIMARY KEY AUTO_INCREMENT,
+                start_date DATE NOT NULL,
+                end_date DATE NOT NULL,
+                updated_by INT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                FOREIGN KEY (updated_by) REFERENCES admin(admin_id)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+            $sub = $db->fetchOne("SELECT * FROM subscription ORDER BY id DESC LIMIT 1");
+            if (!$sub) {
+                $sub = false;
+            }
+        } catch (Exception $e) {
+            $sub = false;
+        }
+    }
+    return $sub ?: null;
+}
+
+/**
+ * Get subscription status with computed fields
+ * @return array|null ['active', 'expired', 'warning', 'days_remaining', 'months_remaining', 'remaining_text', 'expiry_date', 'start_date']
+ */
+function getSubscriptionStatus() {
+    $sub = getSubscription();
+    if (!$sub) {
+        return null;
+    }
+
+    $today = new DateTime(date('Y-m-d'));
+    $endDate = new DateTime($sub['end_date']);
+    $startDate = new DateTime($sub['start_date']);
+
+    $diff = $today->diff($endDate);
+    $daysRemaining = $endDate >= $today ? (int)$diff->days : -(int)$diff->days;
+
+    $expired = $today > $endDate;
+    $warning = !$expired && $daysRemaining < 30;
+
+    // Build remaining text (e.g. "3 months, 15 days")
+    $remainingText = '';
+    if (!$expired) {
+        $parts = [];
+        if ($diff->m > 0 || $diff->y > 0) {
+            $totalMonths = $diff->y * 12 + $diff->m;
+            $parts[] = $totalMonths . ' month' . ($totalMonths !== 1 ? 's' : '');
+        }
+        if ($diff->d > 0) {
+            $parts[] = $diff->d . ' day' . ($diff->d !== 1 ? 's' : '');
+        }
+        $remainingText = !empty($parts) ? implode(', ', $parts) : '0 days';
+    } else {
+        $remainingText = 'Expired';
+    }
+
+    return [
+        'active' => !$expired,
+        'expired' => $expired,
+        'warning' => $warning,
+        'days_remaining' => $daysRemaining,
+        'remaining_text' => $remainingText,
+        'expiry_date' => $sub['end_date'],
+        'start_date' => $sub['start_date'],
+    ];
+}
+
+/**
  * Validate password strength
  * @param string $password
  * @return array ['valid' => bool, 'message' => string]
@@ -697,5 +790,219 @@ function validatePasswordStrength($password) {
     }
 
     return ['valid' => false, 'message' => implode('. ', $errors)];
+}
+
+// ===================================================================
+// STUDENT PORTAL SESSION FUNCTIONS
+// ===================================================================
+
+/**
+ * Check if a student is logged in
+ * @return bool
+ */
+function isStudentLoggedIn() {
+    return isset($_SESSION['student_id']) && isset($_SESSION['student_logged_in']) && $_SESSION['student_logged_in'] === true;
+}
+
+/**
+ * Require student login - redirect to student login page if not logged in
+ */
+function requireStudentLogin() {
+    if (!isStudentLoggedIn()) {
+        header("Location: /student/login.php");
+        exit();
+    }
+}
+
+/**
+ * Get current student ID
+ * @return int|null
+ */
+function getStudentId() {
+    return $_SESSION['student_id'] ?? null;
+}
+
+/**
+ * Get current student name
+ * @return string|null
+ */
+function getStudentName() {
+    return $_SESSION['student_name'] ?? null;
+}
+
+/**
+ * Get current student admission number
+ * @return string|null
+ */
+function getStudentAdmissionNo() {
+    return $_SESSION['student_admission_no'] ?? null;
+}
+
+/**
+ * Set session data after student login
+ * @param array $studentData
+ */
+function setStudentSession($studentData) {
+    $_SESSION['student_id'] = $studentData['student_id'];
+    $_SESSION['student_admission_no'] = $studentData['admission_no'];
+    $_SESSION['student_name'] = $studentData['first_name'] . ' ' . $studentData['last_name'];
+    $_SESSION['student_class'] = $studentData['class_name'];
+    $_SESSION['student_section'] = $studentData['section_name'];
+    $_SESSION['student_logged_in'] = true;
+    $_SESSION['student_login_time'] = time();
+    $_SESSION['student_last_activity'] = time();
+    $_SESSION['student_password_changed'] = (bool)$studentData['password_changed'];
+
+    // Generate fingerprint (reuses existing helper)
+    $_SESSION['student_fingerprint'] = generateSessionFingerprint(
+        $_SERVER['HTTP_USER_AGENT'] ?? '',
+        getRealIPAddress()
+    );
+
+    // Regenerate session ID to prevent fixation attacks
+    session_regenerate_id(true);
+
+    // Log successful login
+    logStudentAudit($studentData['student_id'], 'STUDENT_LOGIN_SUCCESS', 'students', $studentData['student_id']);
+}
+
+/**
+ * Validate student session against hijacking
+ */
+function validateStudentSessionSecurity() {
+    $userAgent = $_SERVER['HTTP_USER_AGENT'] ?? '';
+    $ipAddress = getRealIPAddress();
+
+    // First time - store fingerprint
+    if (!isset($_SESSION['student_fingerprint'])) {
+        $_SESSION['student_fingerprint'] = generateSessionFingerprint($userAgent, $ipAddress);
+        return;
+    }
+
+    // Validate fingerprint
+    $currentFingerprint = generateSessionFingerprint($userAgent, $ipAddress);
+    if ($_SESSION['student_fingerprint'] !== $currentFingerprint) {
+        logStudentAudit(getStudentId(), 'STUDENT_SESSION_HIJACK_ATTEMPT', 'session');
+        studentLogout('Security alert: Your session has been invalidated.');
+    }
+}
+
+/**
+ * Destroy student session and redirect to student login
+ * Only clears student keys, preserves admin session if active
+ * @param string $message Optional logout message
+ */
+function studentLogout($message = null) {
+    // Log logout
+    if (isStudentLoggedIn()) {
+        logStudentAudit(getStudentId(), 'STUDENT_LOGOUT', 'students', getStudentId());
+    }
+
+    // Only clear student session keys (preserve admin session)
+    unset($_SESSION['student_id']);
+    unset($_SESSION['student_admission_no']);
+    unset($_SESSION['student_name']);
+    unset($_SESSION['student_class']);
+    unset($_SESSION['student_section']);
+    unset($_SESSION['student_logged_in']);
+    unset($_SESSION['student_login_time']);
+    unset($_SESSION['student_last_activity']);
+    unset($_SESSION['student_fingerprint']);
+    unset($_SESSION['student_password_changed']);
+
+    if ($message) {
+        setFlashMessage('info', $message);
+    }
+
+    header("Location: /student/login.php");
+    exit();
+}
+
+/**
+ * Log a student audit trail entry
+ * Uses 'student:' prefix on username to distinguish from admin entries
+ * @param int $studentId
+ * @param string $action
+ * @param string $tableName
+ * @param int $recordId
+ * @param array $oldValues
+ * @param array $newValues
+ */
+function logStudentAudit($studentId, $action, $tableName = null, $recordId = null, $oldValues = null, $newValues = null) {
+    try {
+        $db = getDB();
+
+        $username = null;
+        if ($studentId) {
+            $student = $db->fetchOne("SELECT admission_no FROM students WHERE student_id = ?", [$studentId]);
+            $username = $student ? 'student:' . $student['admission_no'] : null;
+        }
+
+        $db->query("INSERT INTO audit_log
+                   (user_id, username, action, table_name, record_id, old_values, new_values, ip_address, user_agent)
+                   VALUES (:user_id, :username, :action, :table_name, :record_id, :old_values, :new_values, :ip_address, :user_agent)",
+                   [
+                       'user_id' => $studentId,
+                       'username' => $username,
+                       'action' => $action,
+                       'table_name' => $tableName,
+                       'record_id' => $recordId,
+                       'old_values' => $oldValues ? json_encode($oldValues) : null,
+                       'new_values' => $newValues ? json_encode($newValues) : null,
+                       'ip_address' => getRealIPAddress(),
+                       'user_agent' => substr($_SERVER['HTTP_USER_AGENT'] ?? '', 0, 255)
+                   ]);
+    } catch (Exception $e) {
+        error_log("Student audit log failed: " . $e->getMessage());
+    }
+}
+
+/**
+ * Generate a simple math CAPTCHA question
+ * Stores answer in session
+ * @return string The question string (e.g. "12 + 7")
+ */
+function generateMathCaptcha() {
+    $a = rand(1, 20);
+    $b = rand(1, 20);
+    $_SESSION['captcha_answer'] = $a + $b;
+    return "$a + $b";
+}
+
+/**
+ * Verify math CAPTCHA answer
+ * @param mixed $answer
+ * @return bool
+ */
+function verifyCaptcha($answer) {
+    return isset($_SESSION['captcha_answer']) && (int)$answer === $_SESSION['captcha_answer'];
+}
+
+/**
+ * Encrypt data using AES-256-CBC
+ * @param string $plaintext
+ * @return string Base64 encoded encrypted string
+ */
+function encryptData($plaintext) {
+    if (empty($plaintext)) return '';
+    $ivLength = openssl_cipher_iv_length(ENCRYPTION_METHOD);
+    $iv = openssl_random_pseudo_bytes($ivLength);
+    $encrypted = openssl_encrypt($plaintext, ENCRYPTION_METHOD, ENCRYPTION_KEY, 0, $iv);
+    return base64_encode($iv . '::' . $encrypted);
+}
+
+/**
+ * Decrypt data encrypted with encryptData()
+ * @param string $ciphertext Base64 encoded encrypted string
+ * @return string|false Decrypted plaintext or false on failure
+ */
+function decryptData($ciphertext) {
+    if (empty($ciphertext)) return '';
+    $data = base64_decode($ciphertext);
+    if ($data === false) return false;
+    $parts = explode('::', $data, 2);
+    if (count($parts) !== 2) return false;
+    list($iv, $encrypted) = $parts;
+    return openssl_decrypt($encrypted, ENCRYPTION_METHOD, ENCRYPTION_KEY, 0, $iv);
 }
 ?>

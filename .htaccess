@@ -1,0 +1,27 @@
+# Force HTTPS
+RewriteEngine On
+RewriteCond %{HTTPS} off
+RewriteRule ^(.*)$ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
+
+# Block access to sensitive files
+<FilesMatch "\.(sql|md)$">
+    Order deny,allow
+    Deny from all
+</FilesMatch>
+
+# Block access to config and backups directories from web
+<IfModule mod_rewrite.c>
+    RewriteRule ^config/ - [F,L]
+    RewriteRule ^backups/ - [F,L]
+</IfModule>
+
+# Block utility/dev scripts
+<FilesMatch "^(generate_students|check_email_config|try_domain_smtp|update_smtp_ssl)\.php$">
+    Order deny,allow
+    Deny from all
+</FilesMatch>
+
+# PHP settings
+php_value upload_max_filesize 10M
+php_value post_max_size 12M
+php_value max_execution_time 120

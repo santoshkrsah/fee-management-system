@@ -464,6 +464,23 @@ INSERT INTO monthly_fee_structure (class_id, academic_year, fee_month, month_lab
 (15, '2026-2027', 12, 'March', 1250.00, 750.00, 100.00, 83.00, 167.00, 250.00, 42.00);
 
 -- =============================================
+-- Table: subscription
+-- Purpose: Store annual subscription tenure (single-row)
+-- =============================================
+CREATE TABLE subscription (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    start_date DATE NOT NULL,
+    end_date DATE NOT NULL,
+    updated_by INT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (updated_by) REFERENCES admin(admin_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Insert default subscription (1 year from today)
+INSERT INTO subscription (start_date, end_date) VALUES (CURDATE(), DATE_ADD(CURDATE(), INTERVAL 1 YEAR));
+
+-- =============================================
 -- Create Indexes for Better Performance
 -- =============================================
 CREATE INDEX idx_student_admission ON students(admission_no);

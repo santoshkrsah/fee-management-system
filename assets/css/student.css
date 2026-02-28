@@ -1,0 +1,253 @@
+/* =============================================
+   Student Portal - Additional Styles
+   Extends the base style.css for student-specific UI
+   ============================================= */
+
+/* Student Login - Green gradient variant */
+.student-login-container {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(135deg, #10b981 0%, #059669 50%, #047857 100%);
+    padding: 2rem;
+    position: relative;
+    overflow: hidden;
+}
+
+.student-login-container::before {
+    content: '';
+    position: absolute;
+    width: 500px;
+    height: 500px;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 50%;
+    top: -250px;
+    right: -250px;
+    animation: float 6s ease-in-out infinite;
+}
+
+.student-login-container::after {
+    content: '';
+    position: absolute;
+    width: 400px;
+    height: 400px;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 50%;
+    bottom: -200px;
+    left: -200px;
+    animation: float 8s ease-in-out infinite reverse;
+}
+
+.student-login-container .login-header {
+    background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+}
+
+.student-login-container .login-body .form-control:focus {
+    border-color: #10b981;
+    box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.1);
+}
+
+.student-login-container .btn-login {
+    background: linear-gradient(135deg, #10b981, #059669);
+}
+
+.student-login-container .btn-login:hover {
+    background: linear-gradient(135deg, #059669, #047857);
+    transform: translateY(-1px);
+}
+
+/* Student portal navbar accent label */
+.student-portal-label {
+    font-size: 0.65rem;
+    background: var(--success);
+    color: white;
+    padding: 0.1rem 0.5rem;
+    border-radius: var(--radius-sm);
+    margin-left: 0.5rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    vertical-align: middle;
+}
+
+/* Password change prompt banner */
+.password-change-banner {
+    background: #fef3c7;
+    border-left: 4px solid #f59e0b;
+    padding: 1rem 1.25rem;
+    border-radius: var(--radius);
+    margin-bottom: 1.5rem;
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.password-change-banner i {
+    color: #f59e0b;
+    font-size: 1.25rem;
+    flex-shrink: 0;
+}
+
+.password-change-banner a {
+    color: #d97706;
+    font-weight: 600;
+    text-decoration: underline;
+}
+
+[data-theme="dark"] .password-change-banner {
+    background: #451a03;
+    border-left-color: #d97706;
+    color: #fde68a;
+}
+
+[data-theme="dark"] .password-change-banner a {
+    color: #fbbf24;
+}
+
+/* Student fee summary cards */
+.student-fee-card {
+    border: none;
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-md);
+    transition: var(--transition);
+    overflow: hidden;
+}
+
+.student-fee-card:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-lg);
+}
+
+.student-fee-card .fee-amount {
+    font-size: 1.75rem;
+    font-weight: 800;
+    font-variant-numeric: tabular-nums;
+}
+
+/* Personal details grid */
+.student-detail-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.75rem 2rem;
+}
+
+.student-detail-grid .detail-item {
+    display: flex;
+    padding: 0.5rem 0;
+    border-bottom: 1px solid var(--gray-100);
+}
+
+.student-detail-grid .detail-label {
+    color: var(--gray-500);
+    min-width: 140px;
+    flex-shrink: 0;
+    font-size: 0.875rem;
+}
+
+.student-detail-grid .detail-value {
+    font-weight: 600;
+    color: var(--gray-800);
+    font-size: 0.875rem;
+}
+
+[data-theme="dark"] .student-detail-grid .detail-item {
+    border-bottom-color: #374151;
+}
+
+[data-theme="dark"] .student-detail-grid .detail-label {
+    color: #9ca3af;
+}
+
+[data-theme="dark"] .student-detail-grid .detail-value {
+    color: #e5e7eb;
+}
+
+/* Student fee cards - dark mode */
+[data-theme="dark"] .student-fee-card {
+    background: #1e293b;
+    border: 1px solid #374151;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.4), 0 2px 4px -1px rgba(0, 0, 0, 0.3);
+}
+
+[data-theme="dark"] .student-fee-card .card-body {
+    color: #e5e7eb;
+}
+
+[data-theme="dark"] .student-fee-card .fee-amount.text-primary {
+    color: #93c5fd !important;
+}
+
+[data-theme="dark"] .student-fee-card .fee-amount.text-success {
+    color: #6ee7b7 !important;
+}
+
+[data-theme="dark"] .student-fee-card .fee-amount.text-danger {
+    color: #fca5a5 !important;
+}
+
+[data-theme="dark"] .student-fee-card .text-muted {
+    color: #9ca3af !important;
+}
+
+/* Math CAPTCHA styling */
+.captcha-question {
+    font-size: 1.25rem;
+    font-weight: 700;
+    color: var(--success);
+    background: var(--gray-100);
+    padding: 0.5rem 1rem;
+    border-radius: var(--radius);
+    display: inline-block;
+    letter-spacing: 1px;
+}
+
+/* Responsive adjustments for detail grid */
+@media (max-width: 768px) {
+    .student-detail-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* Student fee status badges */
+.fee-status-paid {
+    background: #d1fae5;
+    color: #065f46;
+    padding: 0.25rem 0.75rem;
+    border-radius: var(--radius-sm);
+    font-weight: 600;
+    font-size: 0.8rem;
+}
+
+.fee-status-partial {
+    background: #fef3c7;
+    color: #92400e;
+    padding: 0.25rem 0.75rem;
+    border-radius: var(--radius-sm);
+    font-weight: 600;
+    font-size: 0.8rem;
+}
+
+.fee-status-unpaid {
+    background: #fee2e2;
+    color: #991b1b;
+    padding: 0.25rem 0.75rem;
+    border-radius: var(--radius-sm);
+    font-weight: 600;
+    font-size: 0.8rem;
+}
+
+[data-theme="dark"] .fee-status-paid {
+    background: #064e3b;
+    color: #a7f3d0;
+}
+
+[data-theme="dark"] .fee-status-partial {
+    background: #78350f;
+    color: #fde68a;
+}
+
+[data-theme="dark"] .fee-status-unpaid {
+    background: #7f1d1d;
+    color: #fecaca;
+}

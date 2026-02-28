@@ -7,6 +7,24 @@ requireRole(['sysadmin']); // Only system administrators can view logs
 
 $pageTitle = 'Audit Log';
 
+// Handle reset entries
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'reset_entries') {
+    if (!verifyCSRFToken($_POST['csrf_token'] ?? '')) {
+        redirectWithMessage('audit_log.php', 'error', 'Invalid security token. Please try again.');
+    }
+    try {
+        $db = getDB();
+        $countRow = $db->fetchOne("SELECT COUNT(*) as cnt FROM audit_log");
+        $deletedCount = $countRow['cnt'] ?? 0;
+        $db->query("DELETE FROM audit_log");
+        logAudit(getAdminId(), 'AUDIT_LOG_RESET', 'audit_log', null, null, ['deleted_entries' => $deletedCount]);
+        redirectWithMessage('audit_log.php', 'success', "All $deletedCount audit log entries have been deleted.");
+    } catch (Exception $e) {
+        error_log("Audit log reset error: " . $e->getMessage());
+        redirectWithMessage('audit_log.php', 'error', 'Failed to reset audit log. Please try again.');
+    }
+}
+
 // Pagination
 $page = isset($_GET['page']) ? (int)$_GET['page'] : 1;
 $perPage = 50;
@@ -67,10 +85,22 @@ include '../includes/header.php';
 ?>
 
 <div class="container-fluid">
-    <h2 class="mb-4">
-        <i class="fas fa-clipboard-list"></i> Audit Log
-        <span class="badge bg-secondary"><?= number_format($totalRecords) ?> entries</span>
-    </h2>
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2>
+            <i class="fas fa-clipboard-list"></i> Audit Log
+            <span class="badge bg-secondary"><?= number_format($totalRecords) ?> entries</span>
+        </h2>
+        <?php if ($totalRecords > 0): ?>
+        <form method="POST" action="audit_log.php" class="d-inline"
+              onsubmit="return confirm('This will permanently delete ALL <?= number_format($totalRecords) ?> audit log entries. This action cannot be undone. Are you sure?');">
+            <input type="hidden" name="csrf_token" value="<?php echo generateCSRFToken(); ?>">
+            <input type="hidden" name="action" value="reset_entries">
+            <button type="submit" class="btn btn-danger btn-custom">
+                <i class="fas fa-trash-alt"></i> Reset Entries
+            </button>
+        </form>
+        <?php endif; ?>
+    </div>
 
     <!-- Filters -->
     <div class="card card-custom mb-4">

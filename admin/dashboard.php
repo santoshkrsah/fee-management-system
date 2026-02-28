@@ -4,6 +4,7 @@
  */
 require_once '../config/database.php';
 require_once '../includes/session.php';
+require_once '../includes/upi_helper.php';
 
 // Require login
 requireLogin();
@@ -101,6 +102,23 @@ try {
     $classWiseCollection = [];
 }
 
+// Check for locked accounts (sysadmin only)
+$lockedAccountCount = 0;
+$lockedAccountsList = [];
+if (isSysAdmin()) {
+    try {
+        $db = getDB();
+        $lockedAccountsList = $db->fetchAll(
+            "SELECT username, full_name, account_locked_until FROM admin
+             WHERE account_locked_until > NOW() OR failed_login_attempts >= 5
+             ORDER BY account_locked_until DESC"
+        );
+        $lockedAccountCount = count($lockedAccountsList);
+    } catch (Exception $e) {
+        error_log("Locked accounts check: " . $e->getMessage());
+    }
+}
+
 require_once '../includes/header.php';
 ?>
 
@@ -111,6 +129,49 @@ require_once '../includes/header.php';
         </h2>
     </div>
 </div>
+
+<?php if ($lockedAccountCount > 0): ?>
+<!-- Locked Accounts Alert -->
+<div class="row mb-3">
+    <div class="col-12">
+        <div class="alert alert-warning alert-dismissible fade show mb-0" role="alert">
+            <i class="fas fa-user-lock"></i>
+            <strong><?php echo $lockedAccountCount; ?> user account<?php echo $lockedAccountCount > 1 ? 's are' : ' is'; ?> currently locked</strong>
+            due to failed login attempts:
+            <?php
+            $names = array_map(function($u) { return htmlspecialchars($u['username']); }, $lockedAccountsList);
+            echo implode(', ', $names);
+            ?>
+            <a href="/admin/manage_users.php" class="btn btn-sm btn-warning ms-2">
+                <i class="fas fa-unlock"></i> Manage Users
+            </a>
+            <a href="/admin/manage_lockouts.php" class="btn btn-sm btn-outline-warning ms-1">
+                <i class="fas fa-user-lock"></i> Account Lockouts
+            </a>
+            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        </div>
+    </div>
+</div>
+<?php endif; ?>
+
+<?php
+$dashPendingUpi = getPendingUpiCount();
+if ($dashPendingUpi > 0):
+?>
+<!-- Pending UPI Payments Alert -->
+<div class="row mb-3">
+    <div class="col-12">
+        <div class="alert alert-info alert-dismissible fade show mb-0" role="alert">
+            <i class="fas fa-qrcode"></i>
+            <strong><?php echo $dashPendingUpi; ?> UPI payment<?php echo $dashPendingUpi > 1 ? 's are' : ' is'; ?> pending verification.</strong>
+            <a href="/modules/fee_collection/upi_payments.php?status=Pending" class="btn btn-sm btn-info ms-2">
+                <i class="fas fa-eye"></i> Review Now
+            </a>
+            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        </div>
+    </div>
+</div>
+<?php endif; ?>
 
 <!-- Statistics Cards -->
 <div class="row">

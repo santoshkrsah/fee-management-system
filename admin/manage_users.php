@@ -180,6 +180,39 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     }
 
+    // ---- UNLOCK ACCOUNT ----
+    elseif ($action === 'unlock_account') {
+        $userId = intval($_POST['user_id'] ?? 0);
+
+        if ($userId <= 0) {
+            redirectWithMessage('manage_users.php', 'error', 'Invalid user ID.');
+        }
+
+        try {
+            $targetUser = $db->fetchOne("SELECT admin_id, username, failed_login_attempts, account_locked_until FROM admin WHERE admin_id = :id", ['id' => $userId]);
+            if (!$targetUser) {
+                redirectWithMessage('manage_users.php', 'error', 'User not found.');
+            }
+
+            $db->query("UPDATE admin SET failed_login_attempts = 0, account_locked_until = NULL WHERE admin_id = :id",
+                ['id' => $userId]);
+
+            // Also clear rate limit entries for this user
+            $db->query("DELETE FROM login_attempts WHERE username = :username AND success = 0",
+                ['username' => $targetUser['username']]);
+
+            logAudit(getAdminId(), 'UNLOCK_ACCOUNT', 'admin', $userId,
+                ['failed_login_attempts' => $targetUser['failed_login_attempts'], 'account_locked_until' => $targetUser['account_locked_until']],
+                ['failed_login_attempts' => 0, 'account_locked_until' => null]);
+
+            redirectWithMessage('manage_users.php', 'success', 'Account "' . $targetUser['username'] . '" has been unlocked and login attempts reset.');
+
+        } catch (Exception $e) {
+            error_log("Unlock Account Error: " . $e->getMessage());
+            redirectWithMessage('manage_users.php', 'error', 'Failed to unlock account. Please try again.');
+        }
+    }
+
     // ---- TOGGLE STATUS ----
     elseif ($action === 'toggle_status') {
         $userId = intval($_POST['user_id'] ?? 0);
@@ -223,7 +256,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 // Fetch all users for display
 try {
     $db = getDB();
-    $users = $db->fetchAll("SELECT admin_id, username, full_name, email, role, status, created_at, last_login FROM admin ORDER BY role ASC, username ASC");
+    $users = $db->fetchAll("SELECT admin_id, username, full_name, email, role, status, created_at, last_login, failed_login_attempts, account_locked_until FROM admin ORDER BY role ASC, username ASC");
 } catch (Exception $e) {
     error_log("Fetch Users Error: " . $e->getMessage());
     $users = [];
@@ -309,6 +342,11 @@ require_once '../includes/header.php';
                                     <?php else: ?>
                                         <span class="badge bg-danger"><i class="fas fa-times-circle"></i> Inactive</span>
                                     <?php endif; ?>
+                                    <?php if ($user['account_locked_until'] && strtotime($user['account_locked_until']) > time()): ?>
+                                        <span class="badge bg-danger ms-1"><i class="fas fa-lock"></i> Locked</span>
+                                    <?php elseif (($user['failed_login_attempts'] ?? 0) >= 5): ?>
+                                        <span class="badge bg-warning text-dark ms-1"><i class="fas fa-exclamation-triangle"></i> At Limit</span>
+                                    <?php endif; ?>
                                 </td>
                                 <td>
                                     <?php if ($user['last_login']): ?>
@@ -360,6 +398,17 @@ require_once '../includes/header.php';
                                                 </button>
                                             <?php endif; ?>
                                         </form>
+                                        <?php if (($user['account_locked_until'] && strtotime($user['account_locked_until']) > time()) || ($user['failed_login_attempts'] ?? 0) >= 5): ?>
+                                        <form method="POST" action="manage_users.php" class="d-inline"
+                                              onsubmit="return confirm('Unlock account and reset login attempts for <?php echo htmlspecialchars($user['username']); ?>?');">
+                                            <input type="hidden" name="csrf_token" value="<?php echo $csrfToken; ?>">
+                                            <input type="hidden" name="action" value="unlock_account">
+                                            <input type="hidden" name="user_id" value="<?php echo $user['admin_id']; ?>">
+                                            <button type="submit" class="btn btn-sm btn-outline-warning btn-icon ms-1" title="Unlock Account">
+                                                <i class="fas fa-unlock"></i>
+                                            </button>
+                                        </form>
+                                        <?php endif; ?>
                                     <?php endif; ?>
                                 </td>
                             </tr>

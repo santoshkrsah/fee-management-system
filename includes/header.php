@@ -1,4 +1,7 @@
-<?php $siteSettings = getSettings(); ?>
+<?php
+$siteSettings = getSettings();
+require_once __DIR__ . '/upi_helper.php';
+?>
 <!DOCTYPE html>
 <html lang="en" data-theme="light">
 <head>
@@ -46,8 +49,11 @@
                         <ul class="dropdown-menu">
                             <li><a class="dropdown-item" href="/modules/student/add_student.php">Add Student</a></li>
                             <li><a class="dropdown-item" href="/modules/student/view_students.php">View Students</a></li>
-                            <?php if (isSysAdmin()): ?>
+                            <?php if (canEdit()): ?>
                             <li><hr class="dropdown-divider"></li>
+                            <li><a class="dropdown-item" href="/student/init_passwords.php"><i class="fas fa-key"></i> Init Student Passwords</a></li>
+                            <?php endif; ?>
+                            <?php if (isSysAdmin()): ?>
                             <li><a class="dropdown-item" href="/modules/student/bulk_upload.php"><i class="fas fa-file-upload"></i> Bulk Upload</a></li>
                             <?php endif; ?>
                         </ul>
@@ -62,6 +68,16 @@
                             <?php endif; ?>
                             <li><a class="dropdown-item" href="/modules/fee_collection/collect_fee.php">Collect Fee</a></li>
                             <li><a class="dropdown-item" href="/modules/fee_collection/view_payments.php">View Payments</a></li>
+                            <li><hr class="dropdown-divider"></li>
+                            <?php $headerPendingUpi = getPendingUpiCount(); ?>
+                            <li>
+                                <a class="dropdown-item" href="/modules/fee_collection/upi_payments.php">
+                                    <i class="fas fa-qrcode"></i> UPI Payments
+                                    <?php if ($headerPendingUpi > 0): ?>
+                                    <span class="badge bg-danger ms-1"><?php echo $headerPendingUpi; ?></span>
+                                    <?php endif; ?>
+                                </a>
+                            </li>
                         </ul>
                     </li>
                     <li class="nav-item dropdown">
@@ -87,17 +103,37 @@
                         <ul class="dropdown-menu">
                             <li><a class="dropdown-item" href="/admin/settings.php"><i class="fas fa-school"></i> School Settings</a></li>
                             <li><a class="dropdown-item" href="/admin/manage_users.php"><i class="fas fa-users-cog"></i> Manage Users</a></li>
+                            <li><a class="dropdown-item" href="/admin/manage_lockouts.php"><i class="fas fa-user-lock"></i> Account Lockouts</a></li>
                             <li><a class="dropdown-item" href="/admin/manage_classes.php"><i class="fas fa-th-list"></i> Manage Classes</a></li>
                             <li><a class="dropdown-item" href="/admin/manage_sessions.php"><i class="fas fa-calendar-alt"></i> Academic Sessions</a></li>
                             <li><hr class="dropdown-divider"></li>
                             <li><a class="dropdown-item" href="/admin/email_test.php"><i class="fas fa-envelope"></i> Email Configuration</a></li>
                             <li><a class="dropdown-item" href="/admin/database_backup.php"><i class="fas fa-database"></i> Database Backup</a></li>
                             <li><a class="dropdown-item" href="/admin/audit_log.php"><i class="fas fa-clipboard-list"></i> Audit Log</a></li>
+                            <li><hr class="dropdown-divider"></li>
+                            <li><a class="dropdown-item" href="/admin/manage_subscription.php"><i class="fas fa-id-card"></i> Subscription</a></li>
+                            <li><hr class="dropdown-divider"></li>
+                            <li><a class="dropdown-item" href="/admin/upi_settings.php"><i class="fas fa-qrcode"></i> UPI Settings</a></li>
                         </ul>
                     </li>
                     <?php endif; ?>
                 </ul>
                 <ul class="navbar-nav align-items-center">
+                    <?php
+                    $headerSubStatus = getSubscriptionStatus();
+                    if ($headerSubStatus):
+                    ?>
+                    <li class="nav-item me-2">
+                        <a class="btn nav-link" href="#" title="Subscription Info" style="border:none;background:none;" data-bs-toggle="modal" data-bs-target="#subscriptionInfoModal">
+                            <i class="fas fa-id-card"></i>
+                            <?php if ($headerSubStatus['expired']): ?>
+                                <span class="badge bg-danger" style="font-size:0.6rem;vertical-align:top;">Expired</span>
+                            <?php elseif ($headerSubStatus['warning']): ?>
+                                <span class="badge bg-warning text-dark" style="font-size:0.6rem;vertical-align:top;"><?php echo $headerSubStatus['days_remaining']; ?>d</span>
+                            <?php endif; ?>
+                        </a>
+                    </li>
+                    <?php endif; ?>
                     <li class="nav-item me-2">
                         <button class="btn nav-link" id="darkModeToggle" title="Toggle Dark Mode" style="border:none;background:none;">
                             <i class="fas fa-moon" id="darkModeIcon"></i>
@@ -173,3 +209,91 @@
             <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
         </div>
         <?php endif; ?>
+
+<?php if(isLoggedIn() && basename($_SERVER['PHP_SELF']) != 'login.php'): ?>
+<?php if (isset($headerSubStatus) && $headerSubStatus): ?>
+<!-- Subscription Info Modal (accessible to all users) -->
+<div class="modal fade" id="subscriptionInfoModal" tabindex="-1" aria-labelledby="subscriptionInfoModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header bg-primary text-white">
+                <h5 class="modal-title" id="subscriptionInfoModalLabel">
+                    <i class="fas fa-id-card"></i> Subscription Details
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <table class="table table-borderless mb-0">
+                    <tr>
+                        <td class="text-muted" style="width:40%;">Start Date</td>
+                        <td><strong><?php echo formatDate($headerSubStatus['start_date']); ?></strong></td>
+                    </tr>
+                    <tr>
+                        <td class="text-muted">Expiry Date</td>
+                        <td><strong><?php echo formatDate($headerSubStatus['expiry_date']); ?></strong></td>
+                    </tr>
+                    <tr>
+                        <td class="text-muted">Remaining</td>
+                        <td><strong><?php echo htmlspecialchars($headerSubStatus['remaining_text']); ?></strong></td>
+                    </tr>
+                    <tr>
+                        <td class="text-muted">Status</td>
+                        <td>
+                            <?php if ($headerSubStatus['expired']): ?>
+                                <span class="badge bg-danger"><i class="fas fa-times-circle"></i> Expired</span>
+                            <?php elseif ($headerSubStatus['warning']): ?>
+                                <span class="badge bg-warning text-dark"><i class="fas fa-exclamation-triangle"></i> Expiring Soon</span>
+                            <?php else: ?>
+                                <span class="badge bg-success"><i class="fas fa-check-circle"></i> Active</span>
+                            <?php endif; ?>
+                        </td>
+                    </tr>
+                </table>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
+<?php endif; ?>
+
+<?php
+// Subscription warning modal (shown once per login for non-sysadmin when < 30 days remaining)
+if (isset($_SESSION['subscription_warning']) && !isSysAdmin()):
+    $swData = $_SESSION['subscription_warning'];
+    unset($_SESSION['subscription_warning']);
+?>
+<!-- Subscription Warning Modal -->
+<div class="modal fade" id="subscriptionWarningModal" tabindex="-1" data-bs-backdrop="static" aria-labelledby="subscriptionWarningModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header bg-warning text-dark">
+                <h5 class="modal-title" id="subscriptionWarningModalLabel">
+                    <i class="fas fa-exclamation-triangle"></i> Subscription Expiring Soon
+                </h5>
+            </div>
+            <div class="modal-body text-center py-4">
+                <i class="fas fa-clock text-warning" style="font-size: 3rem;"></i>
+                <h5 class="mt-3">Your subscription is about to expire</h5>
+                <p class="text-muted mb-1">Expiry Date: <strong><?php echo formatDate($swData['expiry_date']); ?></strong></p>
+                <p class="text-muted mb-3">Remaining: <strong><?php echo (int)$swData['days_remaining']; ?> day(s)</strong></p>
+                <div class="alert alert-warning mb-0">
+                    <i class="fas fa-info-circle"></i>
+                    Your subscription is about to expire. Please contact the developer for renewal before the expiry date.
+                </div>
+            </div>
+            <div class="modal-footer justify-content-center">
+                <button type="button" class="btn btn-primary" data-bs-dismiss="modal">I Understand</button>
+            </div>
+        </div>
+    </div>
+</div>
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        var warningModal = new bootstrap.Modal(document.getElementById('subscriptionWarningModal'));
+        warningModal.show();
+    });
+</script>
+<?php endif; ?>
+<?php endif; ?>

@@ -272,3 +272,30 @@ Anyone can access it at: **http://yourdomain.com**
 ---
 
 **Note:** Keep this file safe and refer to it whenever you need to update or troubleshoot your website.
+
+
+The deployment plan is ready. Here's a summary of what it covers:
+11 steps from scratch:
+1. Enable SSL on Hostinger (free Let's Encrypt)
+2. Set PHP 8.0+ and enable required extensions (pdo_mysql, openssl, mbstring, fileinfo, gd)
+3. Create MySQL database in hPanel with user/password
+4. Import SQL schema via phpMyAdmin (database_schema.sql + database_upi_payments.sql)
+5. Update config files locally — database credentials, encryption key, email settings
+6. Create root .htaccess — HTTPS redirect, block config/SQL/dev files, PHP upload limits
+7. Upload files to public_html/ via File Manager (excluding SQL files, dev scripts, README)
+8. Set directory permissions — 755 on uploads/, backups/, assets/img/
+9. Test — admin login, student login, dashboard, UPI flow
+10. Security hardening — change default password, encryption key, remove dev files
+11. Code edits I'll make — clean up database.php for Hostinger, create .htaccess file
+
+
+Your Deployment Checklist (what YOU do on Hostinger hPanel)
+Step 1: hPanel → Security → SSL → Install free SSL
+Step 2: hPanel → Advanced → PHP Configuration → Set PHP 8.0+, enable pdo_mysql, openssl, mbstring, fileinfo, gd
+Step 3: hPanel → Databases → Create MySQL database → note down the DB name, username, password
+Step 4: hPanel → phpMyAdmin → Import database_schema.sql, then database_upi_payments.sql
+Step 5: Locally edit config/database.php — replace the 3 CHANGE_ME values with your actual Hostinger DB credentials from Step 3
+Step 6: hPanel → File Manager → navigate to public_html/ → delete default files → upload all project files directly into public_html/ (use zip+extract for speed). Do NOT upload the .sql files, generate_students.php, README.md, or database_hostinger.php
+Step 7: Set permissions: uploads/, backups/, assets/img/ → 755
+Step 8: Visit https://yourdomain.com → login as admin → change default password → configure UPI Settings → test student login
+Important: Since the encryption key changed, you'll need to re-configure UPI settings (UPI ID) in the admin panel after deployment, because the old encrypted value won't decrypt with the new key.
