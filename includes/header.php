@@ -51,7 +51,7 @@ require_once __DIR__ . '/upi_helper.php';
                             <li><a class="dropdown-item" href="/modules/student/view_students.php">View Students</a></li>
                             <?php if (canEdit()): ?>
                             <li><hr class="dropdown-divider"></li>
-                            <li><a class="dropdown-item" href="/student/init_passwords.php"><i class="fas fa-key"></i> Init Student Passwords</a></li>
+                            <li><a class="dropdown-item" href="/student/init_passwords.php"><i class="fas fa-key"></i> Student Login</a></li>
                             <?php endif; ?>
                             <?php if (isSysAdmin()): ?>
                             <li><a class="dropdown-item" href="/modules/student/bulk_upload.php"><i class="fas fa-file-upload"></i> Bulk Upload</a></li>

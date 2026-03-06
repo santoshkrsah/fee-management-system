@@ -63,8 +63,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             ['key' => 'fee_mode', 'val' => $fee_mode]
         );
 
-        // Handle school logo upload
-        if (isset($_FILES['school_logo']) && $_FILES['school_logo']['error'] === UPLOAD_ERR_OK) {
+        // Handle school logo upload and removal
+        if (isset($_POST['remove_school_logo']) && !empty($_POST['remove_school_logo'])) {
+            // Remove existing logo files
+            $allowedExtensions = ['jpg', 'jpeg', 'png', 'gif'];
+            $uploadDir = $_SERVER['DOCUMENT_ROOT'] . '/assets/img/';
+            foreach ($allowedExtensions as $ext) {
+                $logoFile = $uploadDir . 'school_logo.' . $ext;
+                if (file_exists($logoFile)) {
+                    unlink($logoFile);
+                }
+            }
+            $db->query("UPDATE settings SET setting_value = '' WHERE setting_key = 'school_logo'");
+        } elseif (isset($_FILES['school_logo']) && $_FILES['school_logo']['error'] === UPLOAD_ERR_OK) {
             $file = $_FILES['school_logo'];
             $allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif'];
             $allowedExtensions = ['jpg', 'jpeg', 'png', 'gif'];
@@ -108,6 +119,65 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $db->query("UPDATE settings SET setting_value = :val WHERE setting_key = :key", [
                 'val' => $relativePath,
                 'key' => 'school_logo'
+            ]);
+        }
+
+        // Handle site icon (favicon) upload and removal
+        if (isset($_POST['remove_site_icon']) && !empty($_POST['remove_site_icon'])) {
+            // Remove existing icon files
+            $allowedExtensions = ['ico', 'jpg', 'jpeg', 'png', 'gif', 'svg'];
+            $uploadDir = $_SERVER['DOCUMENT_ROOT'] . '/assets/img/';
+            foreach ($allowedExtensions as $ext) {
+                $iconFile = $uploadDir . 'site_icon.' . $ext;
+                if (file_exists($iconFile)) {
+                    unlink($iconFile);
+                }
+            }
+            $db->query("UPDATE settings SET setting_value = '' WHERE setting_key = 'site_icon'");
+        } elseif (isset($_FILES['site_icon']) && $_FILES['site_icon']['error'] === UPLOAD_ERR_OK) {
+            $file = $_FILES['site_icon'];
+            $allowedTypes = ['image/x-icon', 'image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/svg+xml'];
+            $allowedExtensions = ['ico', 'jpg', 'jpeg', 'png', 'gif', 'svg'];
+            $maxSize = 1 * 1024 * 1024; // 1MB for favicon
+
+            // Validate file type
+            $fileExtension = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
+            if (!in_array($file['type'], $allowedTypes) || !in_array($fileExtension, $allowedExtensions)) {
+                throw new Exception('Invalid file type for site icon. Allowed: ICO, JPG, PNG, GIF, SVG.');
+            }
+
+            // Validate file size
+            if ($file['size'] > $maxSize) {
+                throw new Exception('Site icon file size exceeds the maximum limit of 1MB.');
+            }
+
+            // Set upload path relative to project root
+            $uploadDir = $_SERVER['DOCUMENT_ROOT'] . '/assets/img/';
+            if (!is_dir($uploadDir)) {
+                mkdir($uploadDir, 0755, true);
+            }
+
+            $fileName = 'site_icon.' . $fileExtension;
+            $uploadPath = $uploadDir . $fileName;
+            $relativePath = 'assets/img/' . $fileName;
+
+            // Remove old icon files if they exist (different extension)
+            foreach ($allowedExtensions as $ext) {
+                $oldFile = $uploadDir . 'site_icon.' . $ext;
+                if (file_exists($oldFile) && $oldFile !== $uploadPath) {
+                    unlink($oldFile);
+                }
+            }
+
+            // Move uploaded file (overwrites if same name exists)
+            if (!move_uploaded_file($file['tmp_name'], $uploadPath)) {
+                throw new Exception('Failed to upload site icon. Please try again.');
+            }
+
+            // Update icon path in settings
+            $db->query("UPDATE settings SET setting_value = :val WHERE setting_key = :key", [
+                'val' => $relativePath,
+                'key' => 'site_icon'
             ]);
         }
 
@@ -181,12 +251,57 @@ require_once '../includes/header.php';
                         <?php if (!empty($settings['school_logo']) && file_exists($_SERVER['DOCUMENT_ROOT'] . '/' . $settings['school_logo'])): ?>
                         <div class="col-md-12 mb-3">
                             <label class="form-label-custom">Current Logo</label>
-                            <div class="p-3 border rounded bg-light text-center">
+                            <div class="p-3 border rounded bg-light d-flex justify-content-between align-items-center">
                                 <img src="/<?php echo htmlspecialchars($settings['school_logo']); ?>"
                                      alt="School Logo"
-                                     style="max-height: 120px; max-width: 100%;"
+                                     style="max-height: 120px; max-width: 70%;"
                                      class="img-fluid">
+                                <button type="button" class="btn btn-sm btn-danger" onclick="document.getElementById('removeLogoConfirm').style.display='block'">
+                                    <i class="fas fa-trash"></i> Remove
+                                </button>
                             </div>
+                            <div id="removeLogoConfirm" style="display:none;" class="alert alert-warning mt-2">
+                                <p class="mb-2">Are you sure you want to remove the school logo?</p>
+                                <button type="button" class="btn btn-sm btn-danger" onclick="document.querySelector('input[name=remove_school_logo]').value='1'; document.querySelector('form').submit()">
+                                    <i class="fas fa-check"></i> Yes, Remove Logo
+                                </button>
+                                <button type="button" class="btn btn-sm btn-secondary" onclick="document.getElementById('removeLogoConfirm').style.display='none'">
+                                    Cancel
+                                </button>
+                            </div>
+                            <input type="hidden" name="remove_school_logo" value="0">
+                        </div>
+                        <?php endif; ?>
+
+                        <div class="col-md-12 mb-3">
+                            <label class="form-label-custom">Site Icon / Favicon</label>
+                            <input type="file" name="site_icon" class="form-control form-control-custom"
+                                   accept=".ico,.jpg,.jpeg,.png,.gif,.svg">
+                            <small class="text-muted">Accepted formats: ICO, JPG, JPEG, PNG, GIF, SVG. Maximum size: 1MB. This icon appears in browser tabs.</small>
+                        </div>
+
+                        <?php if (!empty($settings['site_icon']) && file_exists($_SERVER['DOCUMENT_ROOT'] . '/' . $settings['site_icon'])): ?>
+                        <div class="col-md-12 mb-3">
+                            <label class="form-label-custom">Current Site Icon</label>
+                            <div class="p-3 border rounded bg-light d-flex justify-content-between align-items-center">
+                                <img src="/<?php echo htmlspecialchars($settings['site_icon']); ?>"
+                                     alt="Site Icon"
+                                     style="max-height: 60px; max-width: 70%;"
+                                     class="img-fluid">
+                                <button type="button" class="btn btn-sm btn-danger" onclick="document.getElementById('removeIconConfirm').style.display='block'">
+                                    <i class="fas fa-trash"></i> Remove
+                                </button>
+                            </div>
+                            <div id="removeIconConfirm" style="display:none;" class="alert alert-warning mt-2">
+                                <p class="mb-2">Are you sure you want to remove the site icon?</p>
+                                <button type="button" class="btn btn-sm btn-danger" onclick="document.querySelector('input[name=remove_site_icon]').value='1'; document.querySelector('form').submit()">
+                                    <i class="fas fa-check"></i> Yes, Remove Icon
+                                </button>
+                                <button type="button" class="btn btn-sm btn-secondary" onclick="document.getElementById('removeIconConfirm').style.display='none'">
+                                    Cancel
+                                </button>
+                            </div>
+                            <input type="hidden" name="remove_site_icon" value="0">
                         </div>
                         <?php endif; ?>
 
@@ -247,6 +362,9 @@ require_once '../includes/header.php';
                 </p>
                 <p class="text-muted mb-2">
                     <strong>School Logo</strong> - Displayed in the navigation bar and on printed receipts. Upload a clear image for best results.
+                </p>
+                <p class="text-muted mb-2">
+                    <strong>Site Icon</strong> - Also known as favicon, appears in browser tabs and bookmarks. Recommended: ICO format at 32x32 pixels.
                 </p>
                 <hr>
                 <p class="text-muted mb-2">

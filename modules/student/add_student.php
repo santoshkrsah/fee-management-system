@@ -23,7 +23,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         // Validate inputs
         $admission_no = sanitize($_POST['admission_no']);
         $first_name = sanitize($_POST['first_name']);
-        $last_name = sanitize($_POST['last_name']);
+        $last_name = sanitize($_POST['last_name'] ?? '');
         $father_name = sanitize($_POST['father_name']);
         $mother_name = sanitize($_POST['mother_name'] ?? '');
         $date_of_birth = sanitize($_POST['date_of_birth']);
@@ -32,22 +32,52 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $section_id = (int)$_POST['section_id'];
         $roll_number = sanitize($_POST['roll_number'] ?? '');
         $contact_number = sanitize($_POST['contact_number']);
+        $whatsapp_number = sanitize($_POST['whatsapp_number'] ?? '');
+        $aadhar_number = sanitize($_POST['aadhar_number'] ?? '');
         $email = sanitize($_POST['email'] ?? '');
         $address = sanitize($_POST['address']);
         $admission_date = sanitize($_POST['admission_date']);
         $academic_year = sanitize($_POST['academic_year']);
 
-        // Validate required fields
-        if (empty($admission_no) || empty($first_name) || empty($last_name) ||
+        // Validate required fields (Roll Number now required, Last Name now optional)
+        if (empty($admission_no) || empty($first_name) ||
             empty($father_name) || empty($date_of_birth) || empty($gender) ||
-            empty($class_id) || empty($section_id) || empty($contact_number) ||
-            empty($address) || empty($admission_date) || empty($academic_year)) {
+            empty($class_id) || empty($section_id) || empty($roll_number) ||
+            empty($contact_number) || empty($address) || empty($admission_date) || empty($academic_year)) {
             throw new Exception('All required fields must be filled.');
         }
 
         // Validate phone number
         if (!isValidPhone($contact_number)) {
             throw new Exception('Invalid phone number format.');
+        }
+
+        // Validate WhatsApp number if provided (must be 10 digits)
+        if (!empty($whatsapp_number)) {
+            $whatsapp_clean = preg_replace('/[^0-9]/', '', $whatsapp_number);
+            if (strlen($whatsapp_clean) !== 10) {
+                throw new Exception('WhatsApp number must be 10 digits.');
+            }
+            $whatsapp_number = $whatsapp_clean;
+        }
+
+        // Validate Aadhar number if provided (must be 12 digits)
+        if (!empty($aadhar_number)) {
+            $aadhar_clean = preg_replace('/[^0-9]/', '', $aadhar_number);
+            if (strlen($aadhar_clean) !== 12) {
+                throw new Exception('Aadhar number must be 12 digits.');
+            }
+            $aadhar_number = $aadhar_clean;
+
+            // Check for duplicate Aadhar number
+            $existingAadhar = $db->fetchOne(
+                "SELECT student_id FROM students WHERE aadhar_number = :aadhar_number",
+                ['aadhar_number' => $aadhar_number]
+            );
+
+            if ($existingAadhar) {
+                throw new Exception('This Aadhar number is already registered with another student.');
+            }
         }
 
         // Validate email if provided
@@ -69,11 +99,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $query = "INSERT INTO students (
             admission_no, first_name, last_name, father_name, mother_name,
             date_of_birth, gender, class_id, section_id, roll_number,
-            contact_number, email, password, address, admission_date, academic_year
+            contact_number, whatsapp_number, aadhar_number, email, password,
+            address, admission_date, academic_year
         ) VALUES (
             :admission_no, :first_name, :last_name, :father_name, :mother_name,
             :date_of_birth, :gender, :class_id, :section_id, :roll_number,
-            :contact_number, :email, :password, :address, :admission_date, :academic_year
+            :contact_number, :whatsapp_number, :aadhar_number, :email, :password,
+            :address, :admission_date, :academic_year
         )";
 
         $db->query($query, [
@@ -88,6 +120,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'section_id' => $section_id,
             'roll_number' => $roll_number,
             'contact_number' => $contact_number,
+            'whatsapp_number' => !empty($whatsapp_number) ? $whatsapp_number : null,
+            'aadhar_number' => !empty($aadhar_number) ? $aadhar_number : null,
             'email' => $email,
             'password' => password_hash($contact_number, PASSWORD_BCRYPT, ['cost' => 12]),
             'address' => $address,
@@ -158,8 +192,8 @@ require_once '../../includes/header.php';
                         </div>
 
                         <div class="col-md-4 mb-3">
-                            <label class="form-label-custom">Last Name <span class="text-danger">*</span></label>
-                            <input type="text" name="last_name" class="form-control form-control-custom" required>
+                            <label class="form-label-custom">Last Name</label>
+                            <input type="text" name="last_name" class="form-control form-control-custom">
                         </div>
 
                         <div class="col-md-4 mb-3">
@@ -207,8 +241,8 @@ require_once '../../includes/header.php';
                         </div>
 
                         <div class="col-md-4 mb-3">
-                            <label class="form-label-custom">Roll Number</label>
-                            <input type="text" name="roll_number" class="form-control form-control-custom">
+                            <label class="form-label-custom">Roll Number <span class="text-danger">*</span></label>
+                            <input type="text" name="roll_number" class="form-control form-control-custom" required>
                         </div>
 
                         <div class="col-md-4 mb-3">
@@ -217,8 +251,18 @@ require_once '../../includes/header.php';
                         </div>
 
                         <div class="col-md-4 mb-3">
+                            <label class="form-label-custom">WhatsApp Number</label>
+                            <input type="text" name="whatsapp_number" class="form-control form-control-custom" maxlength="15" placeholder="10 digits">
+                        </div>
+
+                        <div class="col-md-4 mb-3">
                             <label class="form-label-custom">Email</label>
                             <input type="email" name="email" class="form-control form-control-custom">
+                        </div>
+
+                        <div class="col-md-4 mb-3">
+                            <label class="form-label-custom">Aadhar Number</label>
+                            <input type="text" name="aadhar_number" class="form-control form-control-custom" maxlength="12" placeholder="12 digits">
                         </div>
 
                         <div class="col-md-12 mb-3">

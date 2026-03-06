@@ -635,7 +635,7 @@ $(document).ready(function() {
             html += '<thead class="table-light"><tr>';
             html += '<th>Receipt</th><th>Date</th>';
             if (hasMonth) html += '<th>Month</th>';
-            html += '<th class="text-end">Amount</th><th>Mode</th>';
+            html += '<th class="text-end">Amount</th><th>Mode</th><th></th>';
             html += '</tr></thead><tbody>';
 
             payments.forEach(function(p) {
@@ -647,6 +647,7 @@ $(document).ready(function() {
                 }
                 html += '<td class="text-end">' + formatCurrencyJS(p.total_paid) + '</td>';
                 html += '<td><span class="badge bg-secondary">' + escapeHtml(p.payment_mode) + '</span></td>';
+                html += '<td><a href="../../modules/fee_collection/receipt.php?id=' + p.payment_id + '" target="_blank" class="btn btn-sm btn-outline-primary" title="Print Receipt"><i class="fas fa-print"></i></a></td>';
                 html += '</tr>';
             });
 

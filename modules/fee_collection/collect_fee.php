@@ -330,8 +330,8 @@ require_once '../../includes/header.php';
                     </div>
 
                     <div class="d-flex gap-2">
-                        <button type="button" id="calculateTotal" class="btn btn-info btn-custom">
-                            <i class="fas fa-calculator"></i> Calculate Total
+                        <button type="button" id="reviewTotalBtn" class="btn btn-info btn-custom">
+                            <i class="fas fa-eye"></i> Review Total Amount
                         </button>
                         <button type="submit" class="btn btn-success btn-custom">
                             <i class="fas fa-save"></i> Collect Fee & Generate Receipt
@@ -341,6 +341,58 @@ require_once '../../includes/header.php';
                         </a>
                     </div>
                 </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Review Total Amount Modal -->
+<div class="modal fade" id="reviewTotalModal" tabindex="-1" aria-labelledby="reviewTotalModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header bg-info text-white">
+                <h5 class="modal-title" id="reviewTotalModalLabel">
+                    <i class="fas fa-receipt"></i> Review Total Amount
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <div class="row text-center">
+                    <div class="col-12 mb-4">
+                        <small class="text-muted d-block mb-2">Payment Summary</small>
+                        <div class="card border-primary">
+                            <div class="card-body">
+                                <h2 class="text-primary mb-0" id="modalTotalAmount">₹ 0.00</h2>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card mb-3 border-light">
+                    <div class="card-header bg-light">
+                        <strong>Fee Breakdown</strong>
+                    </div>
+                    <div class="card-body">
+                        <table class="table table-sm mb-0">
+                            <tbody id="feeBreakdownTable">
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="alert alert-info mb-0">
+                    <i class="fas fa-info-circle"></i>
+                    <strong>Please review the amount before proceeding.</strong><br>
+                    <small>Click "Proceed to Collect" to finalize the payment and generate receipt.</small>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+                    <i class="fas fa-times"></i> Cancel
+                </button>
+                <button type="button" class="btn btn-success" id="proceedCollectBtn">
+                    <i class="fas fa-check"></i> Proceed to Collect
+                </button>
             </div>
         </div>
     </div>
@@ -562,6 +614,70 @@ $(document).ready(function() {
             return false;
         }
         <?php endif; ?>
+    });
+
+    // Review Total Amount button
+    $('#reviewTotalBtn').on('click', function() {
+        calculateTotalFee();
+
+        // Check if student is selected
+        var studentId = $('#student_id').val();
+        if (!studentId || studentId === '') {
+            alert('Please search and select a student first.');
+            return;
+        }
+
+        // Build fee breakdown table
+        var breakdownHtml = '';
+        var feeItems = [
+            { name: 'Tuition Fee', id: 'tuition_fee_paid' },
+            { name: 'Exam Fee', id: 'exam_fee_paid' },
+            { name: 'Library Fee', id: 'library_fee_paid' },
+            { name: 'Sports Fee', id: 'sports_fee_paid' },
+            { name: 'Lab Fee', id: 'lab_fee_paid' },
+            { name: 'Transport Fee', id: 'transport_fee_paid' },
+            { name: 'Other Charges', id: 'other_charges_paid' }
+        ];
+
+        feeItems.forEach(function(item) {
+            var amount = parseFloat($('#' + item.id).val() || 0);
+            if (amount > 0) {
+                breakdownHtml += '<tr><td class="text-start">' + item.name + '</td>';
+                breakdownHtml += '<td class="text-end"><strong>₹ ' + amount.toFixed(2) + '</strong></td></tr>';
+            }
+        });
+
+        var fine = parseFloat($('#fine').val() || 0);
+        if (fine > 0) {
+            breakdownHtml += '<tr class="table-warning"><td class="text-start">Fine</td>';
+            breakdownHtml += '<td class="text-end"><strong>₹ ' + fine.toFixed(2) + '</strong></td></tr>';
+        }
+
+        var discount = parseFloat($('#discount').val() || 0);
+        if (discount > 0) {
+            breakdownHtml += '<tr class="table-info"><td class="text-start">Discount</td>';
+            breakdownHtml += '<td class="text-end"><strong>- ₹ ' + discount.toFixed(2) + '</strong></td></tr>';
+        }
+
+        var total = parseFloat($('#total_paid').val() || 0);
+        breakdownHtml += '<tr class="table-success"><td class="text-start"><strong>Total</strong></td>';
+        breakdownHtml += '<td class="text-end"><strong>₹ ' + total.toFixed(2) + '</strong></td></tr>';
+
+        $('#feeBreakdownTable').html(breakdownHtml);
+        $('#modalTotalAmount').text('₹ ' + total.toFixed(2));
+
+        // Show modal
+        var modal = new bootstrap.Modal(document.getElementById('reviewTotalModal'));
+        modal.show();
+    });
+
+    // Proceed to Collect button
+    $('#proceedCollectBtn').on('click', function() {
+        // Close modal
+        bootstrap.Modal.getInstance(document.getElementById('reviewTotalModal')).hide();
+
+        // Submit the form
+        document.getElementById('feeCollectionForm').submit();
     });
 
     // Auto-select student if ?student= parameter is present in URL

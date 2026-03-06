@@ -88,6 +88,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['student_id'])) {
         try {
             $payments = $db->fetchAll("
                 SELECT
+                    fc.payment_id,
                     fc.receipt_no,
                     fc.payment_date,
                     fc.total_paid,
@@ -102,6 +103,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['student_id'])) {
             // fee_month column may not exist yet if schema not updated
             $payments = $db->fetchAll("
                 SELECT
+                    fc.payment_id,
                     fc.receipt_no,
                     fc.payment_date,
                     fc.total_paid,
