@@ -93,7 +93,7 @@ require_once '../includes/header.php';
 <div class="row mb-4">
     <div class="col-lg-8">
         <div class="card card-custom">
-            <div class="card-header d-flex justify-content-between align-items-center">
+            <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
                 <span><i class="fas fa-sign-in-alt"></i> Student Login Access</span>
                 <?php if ($studentLoginEnabled): ?>
                     <span class="badge bg-success"><i class="fas fa-check-circle"></i> Enabled</span>

@@ -178,7 +178,7 @@ require_once '../../includes/header.php';
 <div class="row">
     <div class="col-12">
         <div class="card card-custom">
-            <div class="card-header d-flex justify-content-between align-items-center">
+            <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
                 <span><i class="fas fa-list"></i> Month-wise Collection Summary</span>
                 <span>
                     <button class="btn btn-outline-success btn-sm" onclick="exportTableToCSV('month_wise_report.csv')"><i class="fas fa-file-csv"></i> CSV</button>

@@ -175,10 +175,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
 
             // Update icon path in settings
-            $db->query("UPDATE settings SET setting_value = :val WHERE setting_key = :key", [
-                'val' => $relativePath,
-                'key' => 'site_icon'
-            ]);
+            $db->query(
+                "INSERT INTO settings (setting_key, setting_value) VALUES (:key, :val)
+                 ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)",
+                ['key' => 'site_icon', 'val' => $relativePath]
+            );
         }
 
         // Refresh settings after update
@@ -251,7 +252,7 @@ require_once '../includes/header.php';
                         <?php if (!empty($settings['school_logo']) && file_exists($_SERVER['DOCUMENT_ROOT'] . '/' . $settings['school_logo'])): ?>
                         <div class="col-md-12 mb-3">
                             <label class="form-label-custom">Current Logo</label>
-                            <div class="p-3 border rounded bg-light d-flex justify-content-between align-items-center">
+                            <div class="p-3 border rounded bg-light d-flex justify-content-between align-items-center flex-wrap gap-2">
                                 <img src="/<?php echo htmlspecialchars($settings['school_logo']); ?>"
                                      alt="School Logo"
                                      style="max-height: 120px; max-width: 70%;"
@@ -283,7 +284,7 @@ require_once '../includes/header.php';
                         <?php if (!empty($settings['site_icon']) && file_exists($_SERVER['DOCUMENT_ROOT'] . '/' . $settings['site_icon'])): ?>
                         <div class="col-md-12 mb-3">
                             <label class="form-label-custom">Current Site Icon</label>
-                            <div class="p-3 border rounded bg-light d-flex justify-content-between align-items-center">
+                            <div class="p-3 border rounded bg-light d-flex justify-content-between align-items-center flex-wrap gap-2">
                                 <img src="/<?php echo htmlspecialchars($settings['site_icon']); ?>"
                                      alt="Site Icon"
                                      style="max-height: 60px; max-width: 70%;"

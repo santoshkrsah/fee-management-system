@@ -26,6 +26,13 @@ try {
         redirectWithMessage('view_payments.php', 'error', 'Payment record not found.');
     }
 
+    // Clear the reference in upi_payments before deleting (handles cases where
+    // ON DELETE SET NULL FK constraint may not exist in older DB setups)
+    $db->query(
+        "UPDATE upi_payments SET payment_id = NULL WHERE payment_id = :id",
+        ['id' => $payment_id]
+    );
+
     // Delete the payment record
     $db->query(
         "DELETE FROM fee_collection WHERE payment_id = :id",

@@ -6,6 +6,7 @@
  */
 require_once '../config/database.php';
 require_once '../includes/session.php';
+require_once '../includes/fee_type_helper.php';
 
 requireStudentLogin();
 
@@ -55,16 +56,9 @@ logStudentAudit($studentId, 'STUDENT_VIEW_RECEIPT', 'fee_collection', $payment_i
 $pageTitle = 'Receipt - ' . $payment['receipt_no'];
 $receiptSettings = getSettings();
 
-// Build fee items array
-$feeItems = [];
-$sn = 1;
-if ($payment['tuition_fee_paid'] > 0) $feeItems[] = ['sn' => $sn++, 'name' => 'Tuition Fee', 'amount' => $payment['tuition_fee_paid']];
-if ($payment['exam_fee_paid'] > 0) $feeItems[] = ['sn' => $sn++, 'name' => 'Exam Fee', 'amount' => $payment['exam_fee_paid']];
-if ($payment['library_fee_paid'] > 0) $feeItems[] = ['sn' => $sn++, 'name' => 'Library Fee', 'amount' => $payment['library_fee_paid']];
-if ($payment['sports_fee_paid'] > 0) $feeItems[] = ['sn' => $sn++, 'name' => 'Sports Fee', 'amount' => $payment['sports_fee_paid']];
-if ($payment['lab_fee_paid'] > 0) $feeItems[] = ['sn' => $sn++, 'name' => 'Lab Fee', 'amount' => $payment['lab_fee_paid']];
-if ($payment['transport_fee_paid'] > 0) $feeItems[] = ['sn' => $sn++, 'name' => 'Transport Fee', 'amount' => $payment['transport_fee_paid']];
-if ($payment['other_charges_paid'] > 0) $feeItems[] = ['sn' => $sn++, 'name' => 'Other Charges', 'amount' => $payment['other_charges_paid']];
+// Build fee items array dynamically from fee_types
+$feeItems = buildFeeItemsArray($payment, 'paid');
+$sn = count($feeItems) + 1;
 if ($payment['fine'] > 0) $feeItems[] = ['sn' => $sn++, 'name' => 'Late Fee / Fine', 'amount' => $payment['fine'], 'type' => 'fine'];
 if ($payment['discount'] > 0) $feeItems[] = ['sn' => $sn++, 'name' => 'Discount', 'amount' => $payment['discount'], 'type' => 'discount'];
 
@@ -85,8 +79,8 @@ if ($paise > 0) {
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title><?php echo $pageTitle; ?></title>
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
-    <style>
+    <link rel="icon" type="image/svg+xml" href="/assets/images/favicon.svg">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">    <style>
         :root {
             --accent: #1a56db;
             --accent-light: #e8eefb;
@@ -354,10 +348,266 @@ if ($paise > 0) {
         }
 
         @media print {
+            * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
             .no-print { display: none !important; }
-            body { background: #fff; margin: 0; padding: 0; }
-            .receipt { margin: 0; border: none; box-shadow: none; max-width: 100%; }
-            @page { size: A4; margin: 10mm 12mm; }
+
+            body { background: #fff; margin: 0; padding: 0; color: #1a1a2e; font-size: 11px; font-family: 'Segoe UI', Arial, sans-serif; }
+
+            .receipt { margin: 0; border: 1.5px solid #3b82f6; box-shadow: none; max-width: 100%; }
+
+            /* Remove top stripe */
+            .receipt-accent { display: none !important; }
+
+            /* Header */
+            .receipt-header { padding: 9px 18px 7px !important; border-bottom: 1.5px solid #1e3a8a !important; gap: 10px !important; }
+            .receipt-header .school-logo { width: 42px !important; height: 42px !important; }
+            .receipt-header .school-info h1 { font-size: 14px !important; color: #1a56db !important; margin-bottom: 1px !important; }
+            .receipt-header .school-info .address,
+            .receipt-header .school-info .contact-info { font-size: 9.5px !important; color: #475569 !important; }
+
+            /* Title bar */
+            .receipt-title-bar {
+                background: #eef2ff !important; color: #1e3a8a !important;
+                border-bottom: 1.5px solid #1e3a8a !important; border-top: none !important;
+                padding: 4px 18px !important; font-size: 11px !important; letter-spacing: 2.5px;
+            }
+
+            /* Meta row */
+            .receipt-meta { padding: 5px 18px !important; background: #f8faff !important; border-bottom: 1px solid #bfdbfe !important; font-size: 10.5px !important; flex-wrap: wrap !important; gap: 2px 20px !important; }
+            .receipt-meta span { color: #64748b !important; }
+            .receipt-meta strong { color: #1a1a2e !important; }
+
+            /* Student details */
+            .student-details { padding: 6px 18px !important; border-bottom: 1px solid #bfdbfe !important; }
+            .detail-grid { gap: 2px 20px !important; }
+            .detail-item { padding: 1px 0 !important; font-size: 10.5px !important; }
+            .detail-item .label { min-width: 90px !important; font-size: 10px !important; color: #5c6b80 !important; }
+            .detail-item .value { font-size: 10.5px !important; font-weight: 600 !important; color: #1a1a2e !important; }
+
+            /* Fee table */
+            .fee-table-section { padding: 0 18px !important; }
+            .fee-table { border: 1px solid #93c5fd; margin: 6px 0 0 !important; }
+            .fee-table thead th {
+                background: #dbeafe !important; color: #1e3a8a !important;
+                border-bottom: 1.5px solid #1e3a8a !important; border-right: 1px solid #93c5fd !important;
+                padding: 5px 8px !important; font-size: 9.5px !important;
+                text-transform: uppercase !important; letter-spacing: 0.5px !important;
+            }
+            .fee-table thead th:last-child { border-right: none !important; }
+            .fee-table tbody td { padding: 4px 8px !important; font-size: 10.5px !important; border-bottom: 1px solid #e2e8f0 !important; border-right: 1px solid #e2e8f0 !important; color: #1a1a2e !important; }
+            .fee-table tbody td:last-child { border-right: none !important; }
+            .fee-table tbody tr:nth-child(even) { background: #f0f7ff !important; }
+            .fee-table tbody tr.fine-row td, .fee-table tbody tr.discount-row td { color: #1a1a2e !important; font-style: italic; }
+            .fee-table tfoot td { padding: 5px 8px !important; font-size: 11px !important; border-top: 1.5px solid #1e3a8a !important; background: #dbeafe !important; color: #1e3a8a !important; }
+            .fee-table tfoot td:last-child { font-size: 13px !important; font-weight: 800 !important; color: #1a56db !important; }
+
+            /* Amount in words */
+            .amount-words { margin: 5px 18px 0 !important; padding: 5px 10px !important; font-size: 10px !important; background: #eff6ff !important; border: 1px solid #bfdbfe !important; border-left: 3px solid #1a56db !important; color: #1a1a2e !important; }
+            .amount-words strong { color: #1a56db !important; }
+
+            /* Payment info */
+            .payment-info { padding: 6px 18px !important; margin-top: 0 !important; border-top: 1px solid #bfdbfe !important; font-size: 10px !important; flex-wrap: wrap !important; gap: 4px 20px !important; }
+            .payment-info .label { font-size: 9px !important; color: #64748b !important; }
+            .payment-info .value { font-size: 10.5px !important; color: #1a1a2e !important; }
+
+            /* Footer */
+            .receipt-footer { padding: 7px 18px 10px !important; margin-top: 2px !important; border-top: 1px dashed #93c5fd !important; }
+            .signatures { margin-top: 10px !important; }
+            .sig-block { min-width: 120px !important; }
+            .sig-line { padding-top: 3px !important; font-size: 9.5px !important; border-top: 1px solid #334155 !important; color: #1a1a2e !important; }
+            .receipt-note { font-size: 8.5px !important; margin-top: 6px !important; padding-top: 4px !important; color: #64748b !important; border-top: 1px solid #e2e8f0 !important; }
+
+            @page { size: A4 portrait; margin: 8mm 12mm; }
+        }
+
+        /* Mobile Responsive */
+        @media (max-width: 768px) {
+            .receipt-header {
+                padding: 15px 20px 12px;
+                flex-direction: column;
+                text-align: center;
+            }
+
+            .receipt-header .school-logo {
+                width: 50px;
+                height: 50px;
+            }
+
+            .receipt-header .school-info h1 {
+                font-size: 16px;
+            }
+
+            .receipt-header div[style="width:60px;"] {
+                display: none;
+            }
+
+            .receipt-meta {
+                flex-wrap: wrap;
+                padding: 10px 20px;
+                gap: 5px 15px;
+            }
+
+            .student-details {
+                padding: 10px 20px;
+            }
+
+            .detail-grid {
+                grid-template-columns: 1fr;
+                gap: 4px;
+            }
+
+            .fee-table-section {
+                padding: 0 15px;
+            }
+
+            .amount-words {
+                margin: 8px 15px 0;
+                font-size: 11px;
+            }
+
+            .payment-info {
+                flex-wrap: wrap;
+                padding: 10px 20px;
+                gap: 10px;
+            }
+
+            .payment-info .info-group {
+                min-width: 45%;
+            }
+
+            .receipt-footer {
+                padding: 12px 20px 15px;
+            }
+
+            .signatures {
+                gap: 15px;
+            }
+
+            .sig-block {
+                min-width: 120px;
+            }
+        }
+
+        @media (max-width: 480px) {
+            .actions-bar {
+                flex-direction: column;
+                padding: 0 10px;
+            }
+
+            .actions-bar .btn {
+                width: 100%;
+                justify-content: center;
+            }
+
+            .receipt {
+                margin: 10px auto 20px;
+            }
+
+            .receipt-header {
+                padding: 12px 15px 10px;
+            }
+
+            .receipt-header .school-logo {
+                width: 40px;
+                height: 40px;
+            }
+
+            .receipt-header .school-info h1 {
+                font-size: 14px;
+                letter-spacing: 0;
+            }
+
+            .receipt-header .school-info .address,
+            .receipt-header .school-info .contact-info {
+                font-size: 10px;
+            }
+
+            .receipt-title-bar {
+                font-size: 12px;
+                padding: 5px;
+                letter-spacing: 1px;
+            }
+
+            .receipt-meta {
+                flex-direction: column;
+                padding: 8px 15px;
+                gap: 4px;
+            }
+
+            .student-details {
+                padding: 8px 15px;
+            }
+
+            .detail-item .label {
+                min-width: 90px;
+                font-size: 11px;
+            }
+
+            .detail-item .value {
+                font-size: 11px;
+            }
+
+            .fee-table-section {
+                padding: 0 10px;
+            }
+
+            .fee-table thead th {
+                padding: 5px 8px;
+                font-size: 10px;
+            }
+
+            .fee-table tbody td {
+                padding: 5px 8px;
+                font-size: 11px;
+            }
+
+            .fee-table tfoot td {
+                padding: 6px 8px;
+                font-size: 12px;
+            }
+
+            .fee-table tfoot td:last-child {
+                font-size: 13px;
+            }
+
+            .amount-words {
+                margin: 6px 10px 0;
+                padding: 6px 10px;
+                font-size: 10px;
+            }
+
+            .payment-info {
+                flex-direction: column;
+                padding: 8px 15px;
+                gap: 8px;
+            }
+
+            .payment-info .info-group {
+                min-width: 100%;
+                flex-direction: row;
+                justify-content: space-between;
+                align-items: center;
+            }
+
+            .receipt-footer {
+                padding: 10px 15px 12px;
+            }
+
+            .signatures {
+                margin-top: 15px;
+            }
+
+            .sig-block {
+                min-width: 100px;
+            }
+
+            .sig-line {
+                font-size: 10px;
+            }
+
+            .receipt-note {
+                font-size: 9px;
+            }
         }
     </style>
 </head>

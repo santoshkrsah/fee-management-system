@@ -131,6 +131,11 @@ $pageTitle = 'Student Login - ' . $siteSettings['school_name'];
 </head>
 <body>
     <div class="student-login-container">
+        <div class="login-particles">
+            <span></span><span></span><span></span><span></span><span></span>
+            <span></span><span></span><span></span><span></span><span></span>
+        </div>
+        <div class="login-shimmer"></div>
         <div class="login-card">
             <div class="login-header">
                 <?php if (!empty($siteSettings['school_logo']) && file_exists($_SERVER['DOCUMENT_ROOT'] . '/' . $siteSettings['school_logo'])): ?>

@@ -302,7 +302,7 @@ try {
 <div class="row mb-4">
     <div class="col-12">
         <div class="card card-custom">
-            <div class="card-header d-flex justify-content-between align-items-center">
+            <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
                 <span><i class="fas fa-history"></i> Recent Payments</span>
                 <a href="receipts.php" class="btn btn-sm btn-outline-primary">
                     <i class="fas fa-receipt"></i> View All Receipts

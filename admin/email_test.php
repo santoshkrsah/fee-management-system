@@ -205,6 +205,7 @@ include '../includes/header.php';
                 <div class="card-body">
                     <div class="row">
                         <div class="col-md-6">
+                            <div class="table-responsive">
                             <table class="table table-sm">
                                 <tr>
                                     <td><strong>Email Sending:</strong></td>
@@ -223,8 +224,10 @@ include '../includes/header.php';
                                     <td><?= strtoupper($currentConfig['smtp_encryption']) ?></td>
                                 </tr>
                             </table>
+                            </div>
                         </div>
                         <div class="col-md-6">
+                            <div class="table-responsive">
                             <table class="table table-sm">
                                 <tr>
                                     <td><strong>Username:</strong></td>
@@ -249,6 +252,7 @@ include '../includes/header.php';
                                     </td>
                                 </tr>
                             </table>
+                            </div>
                         </div>
                     </div>
 

@@ -8,6 +8,9 @@ require_once '../../includes/session.php';
 requireLogin();
 
 $selectedSession = getSelectedSession();
+$feeMode = getFeeMode();
+$academicMonths = getAcademicMonths();
+$selectedMonth = isset($_GET['month']) ? $_GET['month'] : '';
 
 // Filters
 $search = sanitize($_GET['search'] ?? '');
@@ -20,62 +23,186 @@ $pageTitle = ($status_filter === 'partial') ? 'Partial Paid Students Report' : '
 try {
     $db = getDB();
 
-    // Get all students with fee summary
-    $query = "
-        SELECT
-            s.student_id,
-            s.admission_no,
-            s.roll_number,
-            CONCAT(s.first_name, ' ', s.last_name) as student_name,
-            s.father_name,
-            s.contact_number,
-            c.class_name,
-            sec.section_name,
-            COALESCE(MAX(fs.total_fee), 0) as total_fee,
-            COALESCE(SUM(fc.total_paid), 0) as total_paid,
-            (COALESCE(MAX(fs.total_fee), 0) - COALESCE(SUM(fc.total_paid), 0)) as balance,
-            COUNT(fc.payment_id) as payment_count,
-            MAX(fc.payment_date) as last_payment_date
-        FROM students s
-        JOIN classes c ON s.class_id = c.class_id
-        JOIN sections sec ON s.section_id = sec.section_id
-        LEFT JOIN fee_structure fs ON s.class_id = fs.class_id AND fs.academic_year = :year1
-        LEFT JOIN fee_collection fc ON s.student_id = fc.student_id AND fc.academic_year = :year2
-        WHERE s.status = 'active'
-    ";
+    if ($feeMode === 'monthly' && $selectedMonth !== '' && $selectedMonth !== 'consolidated') {
+        // --- Monthly mode: specific month ---
+        $monthNum = (int)$selectedMonth;
 
-    $params = ['year1' => $selectedSession, 'year2' => $selectedSession];
+        $query = "
+            SELECT
+                s.student_id, s.admission_no, s.roll_number,
+                CONCAT(s.first_name, ' ', s.last_name) as student_name,
+                s.father_name, s.contact_number,
+                c.class_name, sec.section_name,
+                COALESCE(MAX(mfs.total_fee), 0) as total_fee,
+                COALESCE(SUM(fc.total_paid), 0) as total_paid,
+                (COALESCE(MAX(mfs.total_fee), 0) - COALESCE(SUM(fc.total_paid), 0)) as balance,
+                COUNT(fc.payment_id) as payment_count,
+                MAX(fc.payment_date) as last_payment_date
+            FROM students s
+            JOIN classes c ON s.class_id = c.class_id
+            JOIN sections sec ON s.section_id = sec.section_id
+            LEFT JOIN monthly_fee_structure mfs ON s.class_id = mfs.class_id
+                AND mfs.academic_year = :year1 AND mfs.fee_month = :month1 AND mfs.status = 'active'
+            LEFT JOIN fee_collection fc ON s.student_id = fc.student_id
+                AND fc.academic_year = :year2 AND fc.fee_month = :month2
+            WHERE s.status = 'active'
+        ";
+        $params = ['year1' => $selectedSession, 'month1' => $monthNum, 'year2' => $selectedSession, 'month2' => $monthNum];
 
-    if (!empty($search)) {
-        $query .= " AND (
-            s.admission_no LIKE :search1 OR
-            s.first_name LIKE :search2 OR
-            s.last_name LIKE :search3 OR
-            s.father_name LIKE :search4 OR
-            s.roll_number LIKE :search5
-        )";
-        $searchVal = '%' . $search . '%';
-        $params['search1'] = $searchVal;
-        $params['search2'] = $searchVal;
-        $params['search3'] = $searchVal;
-        $params['search4'] = $searchVal;
-        $params['search5'] = $searchVal;
+    } elseif ($feeMode === 'monthly') {
+        // --- Monthly mode: consolidated (per-month logic matching dashboard) ---
+        // Uses subquery wrapper so we can filter with WHERE on computed columns
+        $classFilterSql = '';
+        $searchFilterSql = '';
+        if ($class_filter > 0) {
+            $classFilterSql = ' AND s.class_id = :class_id';
+        }
+        if (!empty($search)) {
+            $searchFilterSql = " AND (
+                s.admission_no LIKE :search1 OR
+                s.first_name LIKE :search2 OR
+                s.last_name LIKE :search3 OR
+                s.father_name LIKE :search4 OR
+                s.roll_number LIKE :search5
+            )";
+        }
+
+        $query = "
+            SELECT * FROM (
+                SELECT
+                    s.student_id, s.admission_no, s.roll_number,
+                    CONCAT(s.first_name, ' ', s.last_name) as student_name,
+                    s.father_name, s.contact_number,
+                    c.class_name, c.class_numeric, sec.section_name,
+                    s.first_name as sort_name,
+                    m.fee_month,
+                    COALESCE((
+                        SELECT mfs.total_fee FROM monthly_fee_structure mfs
+                        WHERE mfs.class_id = s.class_id AND mfs.academic_year = :year1
+                            AND mfs.fee_month = m.fee_month AND mfs.status = 'active'
+                        LIMIT 1
+                    ), 0) as total_fee,
+                    COALESCE((
+                        SELECT SUM(fc.total_paid) FROM fee_collection fc
+                        WHERE fc.student_id = s.student_id AND fc.academic_year = :year2
+                            AND fc.fee_month = m.fee_month
+                    ), 0) as total_paid,
+                    (COALESCE((
+                        SELECT mfs2.total_fee FROM monthly_fee_structure mfs2
+                        WHERE mfs2.class_id = s.class_id AND mfs2.academic_year = :year3
+                            AND mfs2.fee_month = m.fee_month AND mfs2.status = 'active'
+                        LIMIT 1
+                    ), 0) - COALESCE((
+                        SELECT SUM(fc2.total_paid) FROM fee_collection fc2
+                        WHERE fc2.student_id = s.student_id AND fc2.academic_year = :year4
+                            AND fc2.fee_month = m.fee_month
+                    ), 0)) as balance,
+                    COALESCE((
+                        SELECT COUNT(fc3.payment_id) FROM fee_collection fc3
+                        WHERE fc3.student_id = s.student_id AND fc3.academic_year = :year5
+                            AND fc3.fee_month = m.fee_month
+                    ), 0) as payment_count,
+                    (
+                        SELECT MAX(fc4.payment_date) FROM fee_collection fc4
+                        WHERE fc4.student_id = s.student_id AND fc4.academic_year = :year6
+                            AND fc4.fee_month = m.fee_month
+                    ) as last_payment_date
+                FROM students s
+                JOIN classes c ON s.class_id = c.class_id
+                JOIN sections sec ON s.section_id = sec.section_id
+                CROSS JOIN (
+                    SELECT DISTINCT fee_month
+                    FROM monthly_fee_structure
+                    WHERE academic_year = :year7 AND status = 'active'
+                ) m
+                WHERE s.status = 'active'" . $classFilterSql . $searchFilterSql . "
+            ) sub
+        ";
+        $params = [
+            'year1' => $selectedSession, 'year2' => $selectedSession,
+            'year3' => $selectedSession, 'year4' => $selectedSession,
+            'year5' => $selectedSession, 'year6' => $selectedSession,
+            'year7' => $selectedSession
+        ];
+        if ($class_filter > 0) {
+            $params['class_id'] = $class_filter;
+        }
+        if (!empty($search)) {
+            $searchVal = '%' . $search . '%';
+            $params['search1'] = $searchVal;
+            $params['search2'] = $searchVal;
+            $params['search3'] = $searchVal;
+            $params['search4'] = $searchVal;
+            $params['search5'] = $searchVal;
+        }
+
+        if ($status_filter === 'partial') {
+            $query .= " WHERE total_paid > 0 AND total_paid < total_fee";
+        }
+
+        $query .= " ORDER BY class_numeric, section_name, sort_name, fee_month";
+
+        $students = $db->fetchAll($query, $params);
+
+        // Skip the shared filter/HAVING logic below
+        $skipSharedFilters = true;
+
+    } else {
+        // --- Annual mode ---
+        $query = "
+            SELECT
+                s.student_id, s.admission_no, s.roll_number,
+                CONCAT(s.first_name, ' ', s.last_name) as student_name,
+                s.father_name, s.contact_number,
+                c.class_name, sec.section_name,
+                COALESCE(MAX(fs.total_fee), 0) as total_fee,
+                COALESCE(SUM(fc.total_paid), 0) as total_paid,
+                (COALESCE(MAX(fs.total_fee), 0) - COALESCE(SUM(fc.total_paid), 0)) as balance,
+                COUNT(fc.payment_id) as payment_count,
+                MAX(fc.payment_date) as last_payment_date
+            FROM students s
+            JOIN classes c ON s.class_id = c.class_id
+            JOIN sections sec ON s.section_id = sec.section_id
+            LEFT JOIN fee_structure fs ON s.class_id = fs.class_id AND fs.academic_year = :year1
+            LEFT JOIN fee_collection fc ON s.student_id = fc.student_id AND fc.academic_year = :year2
+            WHERE s.status = 'active'
+        ";
+        $params = ['year1' => $selectedSession, 'year2' => $selectedSession];
     }
 
-    if ($class_filter > 0) {
-        $query .= " AND s.class_id = :class_id";
-        $params['class_id'] = $class_filter;
+    if (empty($skipSharedFilters)) {
+        if (!empty($search)) {
+            $query .= " AND (
+                s.admission_no LIKE :search1 OR
+                s.first_name LIKE :search2 OR
+                s.last_name LIKE :search3 OR
+                s.father_name LIKE :search4 OR
+                s.roll_number LIKE :search5
+            )";
+            $searchVal = '%' . $search . '%';
+            $params['search1'] = $searchVal;
+            $params['search2'] = $searchVal;
+            $params['search3'] = $searchVal;
+            $params['search4'] = $searchVal;
+            $params['search5'] = $searchVal;
+        }
+
+        if ($class_filter > 0) {
+            $query .= " AND s.class_id = :class_id";
+            $params['class_id'] = $class_filter;
+        }
+
+        // Specific month and annual use LEFT JOINs, so GROUP BY is needed
+        $query .= " GROUP BY s.student_id";
+
+        if ($status_filter === 'partial') {
+            $query .= " HAVING COALESCE(SUM(fc.total_paid), 0) > 0 AND COALESCE(SUM(fc.total_paid), 0) < COALESCE(MAX(" . ($feeMode === 'monthly' ? 'mfs' : 'fs') . ".total_fee), 0)";
+        }
+
+        $query .= " ORDER BY c.class_numeric, sec.section_name, s.first_name";
+
+        $students = $db->fetchAll($query, $params);
     }
-
-    $query .= " GROUP BY s.student_id";
-
-    if ($status_filter === 'partial') {
-        $query .= " HAVING COALESCE(SUM(fc.total_paid), 0) > 0 AND COALESCE(SUM(fc.total_paid), 0) < COALESCE(MAX(fs.total_fee), 0)";
-    }
-
-    $query .= " ORDER BY c.class_numeric, sec.section_name, s.first_name";
-
-    $students = $db->fetchAll($query, $params);
 
     // Get classes for filter
     $classes = $db->fetchAll("SELECT * FROM classes WHERE status = 'active' ORDER BY class_numeric");
@@ -148,9 +275,19 @@ require_once '../../includes/header.php';
         <h2 class="mb-4">
             <?php if ($status_filter === 'partial'): ?>
                 <i class="fas fa-clock text-warning"></i> Partial Paid Students Report
+                <?php if ($feeMode === 'monthly' && $selectedMonth !== '' && $selectedMonth !== 'consolidated'): ?>
+                    <small class="text-muted">(<?php echo htmlspecialchars($academicMonths[(int)$selectedMonth] ?? ''); ?>)</small>
+                <?php elseif ($feeMode === 'monthly'): ?>
+                    <small class="text-muted">(Consolidated)</small>
+                <?php endif; ?>
                 <span class="badge bg-warning float-end"><?php echo htmlspecialchars($selectedSession); ?></span>
             <?php else: ?>
                 <i class="fas fa-user-check"></i> Student-wise Fee Report
+                <?php if ($feeMode === 'monthly' && $selectedMonth !== '' && $selectedMonth !== 'consolidated'): ?>
+                    <small class="text-muted">(<?php echo htmlspecialchars($academicMonths[(int)$selectedMonth] ?? ''); ?>)</small>
+                <?php elseif ($feeMode === 'monthly'): ?>
+                    <small class="text-muted">(Consolidated)</small>
+                <?php endif; ?>
                 <span class="badge bg-primary float-end"><?php echo htmlspecialchars($selectedSession); ?></span>
             <?php endif; ?>
         </h2>
@@ -165,6 +302,9 @@ require_once '../../includes/header.php';
                 <form method="GET" action="" class="row g-3">
                     <?php if ($status_filter): ?>
                         <input type="hidden" name="status" value="<?php echo htmlspecialchars($status_filter); ?>">
+                    <?php endif; ?>
+                    <?php if ($selectedMonth !== ''): ?>
+                        <input type="hidden" name="month" value="<?php echo htmlspecialchars($selectedMonth); ?>">
                     <?php endif; ?>
                     <div class="col-md-4">
                         <label class="form-label-custom">Search Student</label>
@@ -270,7 +410,7 @@ require_once '../../includes/header.php';
 <div class="row">
     <div class="col-12">
         <div class="card card-custom">
-            <div class="card-header d-flex justify-content-between align-items-center">
+            <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
                 <span><i class="fas fa-history"></i> Payment History (<?php echo count($paymentHistory); ?> payments)</span>
                 <span>
                     <button class="btn btn-outline-success btn-sm" onclick="exportTableToCSV('student_wise_report.csv')"><i class="fas fa-file-csv"></i> CSV</button>
@@ -381,6 +521,9 @@ require_once '../../includes/header.php';
                                 <th>Student Name</th>
                                 <th>Father Name</th>
                                 <th>Class</th>
+                                <?php if ($feeMode === 'monthly' && ($selectedMonth === '' || $selectedMonth === 'consolidated')): ?>
+                                <th>Month</th>
+                                <?php endif; ?>
                                 <th>Roll No</th>
                                 <th class="text-end">Total Fee</th>
                                 <th class="text-end">Paid</th>
@@ -396,6 +539,9 @@ require_once '../../includes/header.php';
                                 <td><?php echo htmlspecialchars($student['student_name']); ?></td>
                                 <td><?php echo htmlspecialchars($student['father_name']); ?></td>
                                 <td><?php echo htmlspecialchars($student['class_name'] . ' - ' . $student['section_name']); ?></td>
+                                <?php if ($feeMode === 'monthly' && ($selectedMonth === '' || $selectedMonth === 'consolidated')): ?>
+                                <td><span class="badge bg-secondary"><?php echo htmlspecialchars($academicMonths[$student['fee_month']] ?? '-'); ?></span></td>
+                                <?php endif; ?>
                                 <td><?php echo htmlspecialchars($student['roll_number'] ?? '-'); ?></td>
                                 <td class="text-end"><?php echo formatCurrency($student['total_fee']); ?></td>
                                 <td class="text-end"><?php echo formatCurrency($student['total_paid']); ?></td>

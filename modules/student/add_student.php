@@ -61,22 +61,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $whatsapp_number = $whatsapp_clean;
         }
 
-        // Validate Aadhar number if provided (must be 12 digits)
+        // Validate Aadhaar number if provided (must be 12 digits)
         if (!empty($aadhar_number)) {
             $aadhar_clean = preg_replace('/[^0-9]/', '', $aadhar_number);
             if (strlen($aadhar_clean) !== 12) {
-                throw new Exception('Aadhar number must be 12 digits.');
+                throw new Exception('Aadhaar number must be 12 digits.');
             }
             $aadhar_number = $aadhar_clean;
 
-            // Check for duplicate Aadhar number
+            // Check for duplicate Aadhaar number
             $existingAadhar = $db->fetchOne(
                 "SELECT student_id FROM students WHERE aadhar_number = :aadhar_number",
                 ['aadhar_number' => $aadhar_number]
             );
 
             if ($existingAadhar) {
-                throw new Exception('This Aadhar number is already registered with another student.');
+                throw new Exception('This Aadhaar number is already registered with another student.');
             }
         }
 
@@ -261,7 +261,7 @@ require_once '../../includes/header.php';
                         </div>
 
                         <div class="col-md-4 mb-3">
-                            <label class="form-label-custom">Aadhar Number</label>
+                            <label class="form-label-custom">Aadhaar Number</label>
                             <input type="text" name="aadhar_number" class="form-control form-control-custom" maxlength="12" placeholder="12 digits">
                         </div>
 

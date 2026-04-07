@@ -4,8 +4,25 @@
  */
 require_once '../../config/database.php';
 require_once '../../includes/session.php';
+require_once '../../includes/fee_type_helper.php';
 
 requireRole(['sysadmin', 'admin']);
+
+// Get dynamic fee type labels
+$feeTypes = getAllFeeTypes();
+$feeTypeLabels = [];
+foreach ($feeTypes as $ft) {
+    $feeTypeLabels[$ft['column_name']] = $ft['label'];
+}
+// Fallback labels if fee_types table is empty
+$defaultLabels = [
+    'tuition_fee' => 'Tuition Fee', 'exam_fee' => 'Exam Fee', 'library_fee' => 'Library Fee',
+    'sports_fee' => 'Sports Fee', 'lab_fee' => 'Lab Fee', 'transport_fee' => 'Transport Fee',
+    'other_charges' => 'Other Charges'
+];
+foreach ($defaultLabels as $col => $lbl) {
+    if (!isset($feeTypeLabels[$col])) $feeTypeLabels[$col] = $lbl;
+}
 
 $pageTitle = 'Fee Structure';
 $error = '';
@@ -57,78 +74,42 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     try {
         if ($_POST['action'] === 'update') {
             $fee_structure_id = (int)$_POST['fee_structure_id'];
-            $tuition_fee = (float)$_POST['tuition_fee'];
-            $exam_fee = (float)$_POST['exam_fee'];
-            $library_fee = (float)$_POST['library_fee'];
-            $sports_fee = (float)$_POST['sports_fee'];
-            $lab_fee = (float)$_POST['lab_fee'];
-            $transport_fee = (float)$_POST['transport_fee'];
-            $other_charges = (float)$_POST['other_charges'];
 
-            $query = "UPDATE fee_structure SET
-                tuition_fee = :tuition_fee,
-                exam_fee = :exam_fee,
-                library_fee = :library_fee,
-                sports_fee = :sports_fee,
-                lab_fee = :lab_fee,
-                transport_fee = :transport_fee,
-                other_charges = :other_charges
-                WHERE fee_structure_id = :id
-            ";
-
-            $db->query($query, [
-                'tuition_fee' => $tuition_fee,
-                'exam_fee' => $exam_fee,
-                'library_fee' => $library_fee,
-                'sports_fee' => $sports_fee,
-                'lab_fee' => $lab_fee,
-                'transport_fee' => $transport_fee,
-                'other_charges' => $other_charges,
-                'id' => $fee_structure_id
-            ]);
-
+            $setClauses = [];
+            $params     = ['id' => $fee_structure_id];
+            foreach ($feeTypes as $ft) {
+                $col            = $ft['column_name'];
+                $params[$col]   = (float)($_POST[$col] ?? 0);
+                $setClauses[]   = "`{$col}` = :{$col}";
+            }
+            $db->query(
+                "UPDATE fee_structure SET " . implode(', ', $setClauses) . " WHERE fee_structure_id = :id",
+                $params
+            );
             redirectWithMessage('view_fee_structure.php', 'success', 'Fee structure updated successfully!');
 
         } elseif ($_POST['action'] === 'add') {
             $class_id = (int)$_POST['class_id'];
-            $tuition_fee = (float)$_POST['tuition_fee'];
-            $exam_fee = (float)$_POST['exam_fee'];
-            $library_fee = (float)$_POST['library_fee'];
-            $sports_fee = (float)$_POST['sports_fee'];
-            $lab_fee = (float)$_POST['lab_fee'];
-            $transport_fee = (float)$_POST['transport_fee'];
-            $other_charges = (float)$_POST['other_charges'];
 
-            // Check if fee structure already exists
             $existing = $db->fetchOne(
                 "SELECT fee_structure_id FROM fee_structure WHERE class_id = :class_id AND academic_year = :year",
                 ['class_id' => $class_id, 'year' => $selectedSession]
             );
+            if ($existing) throw new Exception('Fee structure for this class already exists.');
 
-            if ($existing) {
-                throw new Exception('Fee structure for this class already exists.');
+            $cols   = ['class_id', 'academic_year'];
+            $vals   = [':class_id', ':academic_year'];
+            $params = ['class_id' => $class_id, 'academic_year' => $selectedSession];
+            foreach ($feeTypes as $ft) {
+                $col          = $ft['column_name'];
+                $cols[]       = "`{$col}`";
+                $vals[]       = ":{$col}";
+                $params[$col] = (float)($_POST[$col] ?? 0);
             }
-
-            $query = "INSERT INTO fee_structure (
-                class_id, academic_year, tuition_fee, exam_fee, library_fee,
-                sports_fee, lab_fee, transport_fee, other_charges
-            ) VALUES (
-                :class_id, :academic_year, :tuition_fee, :exam_fee, :library_fee,
-                :sports_fee, :lab_fee, :transport_fee, :other_charges
-            )";
-
-            $db->query($query, [
-                'class_id' => $class_id,
-                'academic_year' => $selectedSession,
-                'tuition_fee' => $tuition_fee,
-                'exam_fee' => $exam_fee,
-                'library_fee' => $library_fee,
-                'sports_fee' => $sports_fee,
-                'lab_fee' => $lab_fee,
-                'transport_fee' => $transport_fee,
-                'other_charges' => $other_charges
-            ]);
-
+            $db->query(
+                "INSERT INTO fee_structure (" . implode(', ', $cols) . ") VALUES (" . implode(', ', $vals) . ")",
+                $params
+            );
             redirectWithMessage('view_fee_structure.php', 'success', 'Fee structure added successfully!');
 
         } elseif ($_POST['action'] === 'delete' && isSysAdmin()) {
@@ -138,66 +119,50 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 throw new Exception('Invalid security token.');
             }
 
-            // Check if any payments reference this fee structure
             $paymentCount = $db->fetchOne(
                 "SELECT COUNT(*) as cnt FROM fee_collection WHERE fee_structure_id = :id",
                 ['id' => $fee_structure_id]
             );
-
             if ($paymentCount && $paymentCount['cnt'] > 0) {
                 throw new Exception('Cannot delete: this fee structure has ' . $paymentCount['cnt'] . ' payment record(s) linked to it.');
             }
 
-            $db->query(
-                "DELETE FROM fee_structure WHERE fee_structure_id = :id",
-                ['id' => $fee_structure_id]
-            );
-
+            $db->query("DELETE FROM fee_structure WHERE fee_structure_id = :id", ['id' => $fee_structure_id]);
             redirectWithMessage('view_fee_structure.php', 'success', 'Fee structure deleted successfully!');
 
         } elseif ($_POST['action'] === 'save_monthly') {
             $class_id = (int)$_POST['class_id'];
-            if ($class_id <= 0) {
-                throw new Exception('Please select a class.');
-            }
+            if ($class_id <= 0) throw new Exception('Please select a class.');
 
             $db->beginTransaction();
             try {
                 foreach ($academicMonths as $monthNum => $monthLabel) {
-                    $tuition = (float)($_POST["tuition_fee_m{$monthNum}"] ?? 0);
-                    $exam = (float)($_POST["exam_fee_m{$monthNum}"] ?? 0);
-                    $library = (float)($_POST["library_fee_m{$monthNum}"] ?? 0);
-                    $sports = (float)($_POST["sports_fee_m{$monthNum}"] ?? 0);
-                    $lab = (float)($_POST["lab_fee_m{$monthNum}"] ?? 0);
-                    $transport = (float)($_POST["transport_fee_m{$monthNum}"] ?? 0);
-                    $other = (float)($_POST["other_charges_m{$monthNum}"] ?? 0);
+                    $feeColsList = [];
+                    $feeValsList = [];
+                    $updateList  = [];
+                    $params = [
+                        'class_id' => $class_id,
+                        'year'     => $selectedSession,
+                        'month'    => $monthNum,
+                        'label'    => $monthLabel,
+                    ];
 
-                    $db->query("
-                        INSERT INTO monthly_fee_structure
-                            (class_id, academic_year, fee_month, month_label,
-                             tuition_fee, exam_fee, library_fee, sports_fee,
-                             lab_fee, transport_fee, other_charges)
+                    foreach ($feeTypes as $ft) {
+                        $col              = $ft['column_name'];
+                        $pkey             = $col . '_m' . $monthNum;
+                        $params[$pkey]    = (float)($_POST[$col . '_m' . $monthNum] ?? 0);
+                        $feeColsList[]    = "`{$col}`";
+                        $feeValsList[]    = ":{$pkey}";
+                        $updateList[]     = "`{$col}` = VALUES(`{$col}`)";
+                    }
+
+                    $db->query("INSERT INTO monthly_fee_structure
+                        (class_id, academic_year, fee_month, month_label, " . implode(', ', $feeColsList) . ")
                         VALUES
-                            (:class_id, :year, :month, :label,
-                             :tuition, :exam, :library, :sports,
-                             :lab, :transport, :other)
+                        (:class_id, :year, :month, :label, " . implode(', ', $feeValsList) . ")
                         ON DUPLICATE KEY UPDATE
-                            tuition_fee = VALUES(tuition_fee),
-                            exam_fee = VALUES(exam_fee),
-                            library_fee = VALUES(library_fee),
-                            sports_fee = VALUES(sports_fee),
-                            lab_fee = VALUES(lab_fee),
-                            transport_fee = VALUES(transport_fee),
-                            other_charges = VALUES(other_charges),
-                            month_label = VALUES(month_label)
-                    ", [
-                        'class_id' => $class_id, 'year' => $selectedSession,
-                        'month' => $monthNum, 'label' => $monthLabel,
-                        'tuition' => $tuition, 'exam' => $exam,
-                        'library' => $library, 'sports' => $sports,
-                        'lab' => $lab, 'transport' => $transport,
-                        'other' => $other
-                    ]);
+                        month_label = VALUES(month_label),
+                        " . implode(', ', $updateList), $params);
                 }
                 $db->commit();
                 redirectWithMessage('view_fee_structure.php', 'success', 'Monthly fee structure saved successfully!');
@@ -229,6 +194,9 @@ require_once '../../includes/header.php';
         <h2 class="mb-4">
             <i class="fas fa-indian-rupee-sign"></i> Fee Structure Management
             <span class="badge bg-primary float-end"><?php echo htmlspecialchars($selectedSession); ?></span>
+            <a href="/admin/manage_fee_types.php" class="btn btn-outline-secondary btn-sm float-end me-2" title="Edit fee type labels, add or remove fee types">
+                <i class="fas fa-tags"></i> Manage Fee Types
+            </a>
         </h2>
     </div>
 </div>
@@ -237,7 +205,7 @@ require_once '../../includes/header.php';
 <div class="row mb-4">
     <div class="col-12">
         <div class="card card-custom">
-            <div class="card-body py-3 d-flex align-items-center justify-content-between">
+            <div class="card-body py-3 d-flex align-items-center justify-content-between flex-wrap gap-2">
                 <div class="d-flex align-items-center">
                     <span class="me-3"><i class="fas fa-calendar-alt"></i> <strong>Fee Mode:</strong></span>
                     <div class="form-check form-switch fee-mode-switch mb-0">
@@ -303,36 +271,13 @@ require_once '../../includes/header.php';
                         </select>
                     </div>
 
+                    <?php foreach ($feeTypes as $ft): ?>
                     <div class="col-md-2">
-                        <label class="form-label-custom">Tuition Fee</label>
-                        <input type="number" name="tuition_fee" class="form-control form-control-custom" step="0.01" min="0" value="0" required>
+                        <label class="form-label-custom"><?php echo htmlspecialchars($ft['label']); ?></label>
+                        <input type="number" name="<?php echo $ft['column_name']; ?>"
+                               class="form-control form-control-custom" step="0.01" min="0" value="0" required>
                     </div>
-
-                    <div class="col-md-2">
-                        <label class="form-label-custom">Exam Fee</label>
-                        <input type="number" name="exam_fee" class="form-control form-control-custom" step="0.01" min="0" value="0" required>
-                    </div>
-
-                    <div class="col-md-2">
-                        <label class="form-label-custom">Library Fee</label>
-                        <input type="number" name="library_fee" class="form-control form-control-custom" step="0.01" min="0" value="0" required>
-                    </div>
-
-                    <div class="col-md-3">
-                        <label class="form-label-custom">&nbsp;</label>
-                        <button type="button" class="btn btn-sm btn-secondary w-100 mb-1" onclick="generateRandomFees('add')">
-                            <i class="fas fa-random"></i> Random Amounts
-                        </button>
-                        <button type="button" class="btn btn-sm btn-info w-100" data-bs-toggle="modal" data-bs-target="#addMoreFeesModal">
-                            More Fees...
-                        </button>
-                    </div>
-
-                    <!-- Hidden fields for other fees -->
-                    <input type="hidden" name="sports_fee" id="add_sports_fee" value="0">
-                    <input type="hidden" name="lab_fee" id="add_lab_fee" value="0">
-                    <input type="hidden" name="transport_fee" id="add_transport_fee" value="0">
-                    <input type="hidden" name="other_charges" id="add_other_charges" value="0">
+                    <?php endforeach; ?>
 
                     <div class="col-12">
                         <button type="submit" class="btn btn-primary btn-custom">
@@ -360,13 +305,9 @@ require_once '../../includes/header.php';
                         <thead>
                             <tr>
                                 <th>Class</th>
-                                <th>Tuition</th>
-                                <th>Exam</th>
-                                <th>Library</th>
-                                <th>Sports</th>
-                                <th>Lab</th>
-                                <th>Transport</th>
-                                <th>Others</th>
+                                <?php foreach ($feeTypes as $ft): ?>
+                                <th><?php echo htmlspecialchars($ft['label']); ?></th>
+                                <?php endforeach; ?>
                                 <th>Total</th>
                                 <th>Actions</th>
                             </tr>
@@ -415,47 +356,17 @@ require_once '../../includes/header.php';
 
                                             <div class="modal-body">
                                                 <div class="row">
+                                                    <?php foreach ($feeTypes as $ft): ?>
                                                     <div class="col-md-6 mb-3">
-                                                        <label class="form-label-custom">Tuition Fee</label>
-                                                        <input type="number" name="tuition_fee" class="form-control form-control-custom"
-                                                               step="0.01" min="0" value="<?php echo $fee['tuition_fee']; ?>" required>
+                                                        <label class="form-label-custom"><?php echo htmlspecialchars($ft['label']); ?></label>
+                                                        <input type="number"
+                                                               name="<?php echo $ft['column_name']; ?>"
+                                                               class="form-control form-control-custom"
+                                                               step="0.01" min="0"
+                                                               value="<?php echo $fee[$ft['column_name']] ?? 0; ?>"
+                                                               required>
                                                     </div>
-
-                                                    <div class="col-md-6 mb-3">
-                                                        <label class="form-label-custom">Exam Fee</label>
-                                                        <input type="number" name="exam_fee" class="form-control form-control-custom"
-                                                               step="0.01" min="0" value="<?php echo $fee['exam_fee']; ?>" required>
-                                                    </div>
-
-                                                    <div class="col-md-6 mb-3">
-                                                        <label class="form-label-custom">Library Fee</label>
-                                                        <input type="number" name="library_fee" class="form-control form-control-custom"
-                                                               step="0.01" min="0" value="<?php echo $fee['library_fee']; ?>" required>
-                                                    </div>
-
-                                                    <div class="col-md-6 mb-3">
-                                                        <label class="form-label-custom">Sports Fee</label>
-                                                        <input type="number" name="sports_fee" class="form-control form-control-custom"
-                                                               step="0.01" min="0" value="<?php echo $fee['sports_fee']; ?>" required>
-                                                    </div>
-
-                                                    <div class="col-md-6 mb-3">
-                                                        <label class="form-label-custom">Lab Fee</label>
-                                                        <input type="number" name="lab_fee" class="form-control form-control-custom"
-                                                               step="0.01" min="0" value="<?php echo $fee['lab_fee']; ?>" required>
-                                                    </div>
-
-                                                    <div class="col-md-6 mb-3">
-                                                        <label class="form-label-custom">Transport Fee</label>
-                                                        <input type="number" name="transport_fee" class="form-control form-control-custom"
-                                                               step="0.01" min="0" value="<?php echo $fee['transport_fee']; ?>" required>
-                                                    </div>
-
-                                                    <div class="col-md-6 mb-3">
-                                                        <label class="form-label-custom">Other Charges</label>
-                                                        <input type="number" name="other_charges" class="form-control form-control-custom"
-                                                               step="0.01" min="0" value="<?php echo $fee['other_charges']; ?>" required>
-                                                    </div>
+                                                    <?php endforeach; ?>
                                                 </div>
                                             </div>
 
@@ -523,13 +434,9 @@ require_once '../../includes/header.php';
                             <thead>
                                 <tr>
                                     <th>Month</th>
-                                    <th>Tuition</th>
-                                    <th>Exam</th>
-                                    <th>Library</th>
-                                    <th>Sports</th>
-                                    <th>Lab</th>
-                                    <th>Transport</th>
-                                    <th>Others</th>
+                                    <?php foreach ($feeTypes as $ft): ?>
+                                    <th><?php echo htmlspecialchars($ft['label']); ?></th>
+                                    <?php endforeach; ?>
                                     <th>Total</th>
                                 </tr>
                             </thead>
@@ -537,13 +444,14 @@ require_once '../../includes/header.php';
                                 <?php foreach ($academicMonths as $mNum => $mLabel): ?>
                                 <tr>
                                     <td><strong><?php echo $mLabel; ?></strong></td>
-                                    <td><input type="number" name="tuition_fee_m<?php echo $mNum; ?>" class="form-control form-control-sm monthly-fee-input" data-month="<?php echo $mNum; ?>" step="0.01" min="0" value="0"></td>
-                                    <td><input type="number" name="exam_fee_m<?php echo $mNum; ?>" class="form-control form-control-sm monthly-fee-input" data-month="<?php echo $mNum; ?>" step="0.01" min="0" value="0"></td>
-                                    <td><input type="number" name="library_fee_m<?php echo $mNum; ?>" class="form-control form-control-sm monthly-fee-input" data-month="<?php echo $mNum; ?>" step="0.01" min="0" value="0"></td>
-                                    <td><input type="number" name="sports_fee_m<?php echo $mNum; ?>" class="form-control form-control-sm monthly-fee-input" data-month="<?php echo $mNum; ?>" step="0.01" min="0" value="0"></td>
-                                    <td><input type="number" name="lab_fee_m<?php echo $mNum; ?>" class="form-control form-control-sm monthly-fee-input" data-month="<?php echo $mNum; ?>" step="0.01" min="0" value="0"></td>
-                                    <td><input type="number" name="transport_fee_m<?php echo $mNum; ?>" class="form-control form-control-sm monthly-fee-input" data-month="<?php echo $mNum; ?>" step="0.01" min="0" value="0"></td>
-                                    <td><input type="number" name="other_charges_m<?php echo $mNum; ?>" class="form-control form-control-sm monthly-fee-input" data-month="<?php echo $mNum; ?>" step="0.01" min="0" value="0"></td>
+                                    <?php foreach ($feeTypes as $ft): ?>
+                                    <td><input type="number"
+                                               name="<?php echo $ft['column_name']; ?>_m<?php echo $mNum; ?>"
+                                               class="form-control form-control-sm monthly-fee-input"
+                                               data-month="<?php echo $mNum; ?>"
+                                               data-field="<?php echo $ft['column_name']; ?>"
+                                               step="0.01" min="0" value="0"></td>
+                                    <?php endforeach; ?>
                                     <td><strong class="month-total" id="month-total-<?php echo $mNum; ?>">0.00</strong></td>
                                 </tr>
                                 <?php endforeach; ?>
@@ -551,7 +459,7 @@ require_once '../../includes/header.php';
                             <tfoot>
                                 <tr class="table-info">
                                     <th>Annual Total</th>
-                                    <th colspan="7"></th>
+                                    <th colspan="<?php echo count($feeTypes); ?>"></th>
                                     <th id="grandMonthlyTotal">0.00</th>
                                 </tr>
                             </tfoot>
@@ -580,8 +488,11 @@ require_once '../../includes/header.php';
                     <table class="table table-custom table-hover table-bordered">
                         <thead>
                             <tr>
-                                <th>Month</th><th>Tuition</th><th>Exam</th><th>Library</th>
-                                <th>Sports</th><th>Lab</th><th>Transport</th><th>Others</th><th>Total</th>
+                                <th>Month</th>
+                                <?php foreach ($feeTypes as $ft): ?>
+                                <th><?php echo htmlspecialchars($ft['label']); ?></th>
+                                <?php endforeach; ?>
+                                <th>Total</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -593,13 +504,9 @@ require_once '../../includes/header.php';
                             ?>
                             <tr>
                                 <td><strong><?php echo $mLabel; ?></strong></td>
-                                <td><?php echo $mData ? formatCurrency($mData['tuition_fee']) : '-'; ?></td>
-                                <td><?php echo $mData ? formatCurrency($mData['exam_fee']) : '-'; ?></td>
-                                <td><?php echo $mData ? formatCurrency($mData['library_fee']) : '-'; ?></td>
-                                <td><?php echo $mData ? formatCurrency($mData['sports_fee']) : '-'; ?></td>
-                                <td><?php echo $mData ? formatCurrency($mData['lab_fee']) : '-'; ?></td>
-                                <td><?php echo $mData ? formatCurrency($mData['transport_fee']) : '-'; ?></td>
-                                <td><?php echo $mData ? formatCurrency($mData['other_charges']) : '-'; ?></td>
+                                <?php foreach ($feeTypes as $ft): ?>
+                                <td><?php echo $mData ? formatCurrency($mData[$ft['column_name']] ?? 0) : '-'; ?></td>
+                                <?php endforeach; ?>
                                 <td><strong><?php echo $mData ? formatCurrency($mData['total_fee']) : '-'; ?></strong></td>
                             </tr>
                             <?php endforeach; ?>
@@ -632,12 +539,23 @@ require_once '../../includes/header.php';
 
 <script>
 $(document).ready(function() {
+    // Collect fee-type column names from rendered inputs (dynamic — works with custom types)
+    var feeFieldNames = [];
+    $('#monthlyFeeTable thead th[data-col]').each(function() {
+        feeFieldNames.push($(this).data('col'));
+    });
+    // Fallback: derive from first row inputs if no data-col attributes
+    if (feeFieldNames.length === 0) {
+        $('tr[data-month="1"] .monthly-fee-input').each(function() {
+            feeFieldNames.push($(this).data('field'));
+        });
+    }
+
     // Load existing monthly data when class is selected
     $('#monthlyClassSelect').on('change', function() {
         var classId = $(this).val();
         if (!classId) return;
 
-        // Reset all fields first
         $('.monthly-fee-input').val(0);
         calculateMonthlyTotals();
 
@@ -650,13 +568,11 @@ $(document).ready(function() {
                 if (response.success && response.months && response.months.length > 0) {
                     response.months.forEach(function(m) {
                         var n = m.fee_month;
-                        $('input[name="tuition_fee_m' + n + '"]').val(m.tuition_fee);
-                        $('input[name="exam_fee_m' + n + '"]').val(m.exam_fee);
-                        $('input[name="library_fee_m' + n + '"]').val(m.library_fee);
-                        $('input[name="sports_fee_m' + n + '"]').val(m.sports_fee);
-                        $('input[name="lab_fee_m' + n + '"]').val(m.lab_fee);
-                        $('input[name="transport_fee_m' + n + '"]').val(m.transport_fee);
-                        $('input[name="other_charges_m' + n + '"]').val(m.other_charges);
+                        // Populate any fee-type field that was returned
+                        Object.keys(m).forEach(function(key) {
+                            var $input = $('input[data-field="' + key + '"][data-month="' + n + '"]');
+                            if ($input.length) $input.val(m[key]);
+                        });
                     });
                     calculateMonthlyTotals();
                 }
@@ -664,31 +580,29 @@ $(document).ready(function() {
         });
     });
 
-    // Auto-calculate monthly row totals
+    // Auto-calculate row totals on any input change
     $(document).on('input', '.monthly-fee-input', function() {
         calculateMonthlyTotals();
     });
 
-    // Copy April values to all months
+    // Copy April (month 1) values to all other months
     $('#copyFirstMonthBtn').on('click', function() {
-        var feeTypes = ['tuition_fee_m', 'exam_fee_m', 'library_fee_m', 'sports_fee_m', 'lab_fee_m', 'transport_fee_m', 'other_charges_m'];
-        feeTypes.forEach(function(prefix) {
-            var aprilVal = $('input[name="' + prefix + '1"]').val() || 0;
-            for (var i = 2; i <= 12; i++) {
-                $('input[name="' + prefix + i + '"]').val(aprilVal);
-            }
-        });
+        for (var m = 2; m <= 12; m++) {
+            $('.monthly-fee-input[data-month="1"]').each(function() {
+                var field = $(this).data('field');
+                var val   = $(this).val() || 0;
+                $('input[data-field="' + field + '"][data-month="' + m + '"]').val(val);
+            });
+        }
         calculateMonthlyTotals();
     });
 
     function calculateMonthlyTotals() {
         var grandTotal = 0;
-        var feeTypes = ['tuition_fee_m', 'exam_fee_m', 'library_fee_m', 'sports_fee_m', 'lab_fee_m', 'transport_fee_m', 'other_charges_m'];
-
         for (var n = 1; n <= 12; n++) {
             var rowTotal = 0;
-            feeTypes.forEach(function(prefix) {
-                rowTotal += parseFloat($('input[name="' + prefix + n + '"]').val() || 0);
+            $('.monthly-fee-input[data-month="' + n + '"]').each(function() {
+                rowTotal += parseFloat($(this).val() || 0);
             });
             $('#month-total-' + n).text(rowTotal.toFixed(2));
             grandTotal += rowTotal;

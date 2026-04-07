@@ -136,12 +136,34 @@ $(document).ready(function() {
         });
     });
 
+    // Month dropdown switcher (updates URL param)
+    $(document).on('click', '.month-switch-item', function(e) {
+        e.preventDefault();
+        var month = $(this).data('month');
+        var url = new URL(window.location.href);
+        if (month === 'consolidated') {
+            url.searchParams.delete('month');
+            url.searchParams.set('month', 'consolidated');
+        } else {
+            url.searchParams.set('month', month);
+        }
+        window.location.href = url.toString();
+    });
+
     // Date input max date to today
     $('input[type="date"]').each(function() {
         if ($(this).hasClass('max-today')) {
             const today = new Date().toISOString().split('T')[0];
             $(this).attr('max', today);
         }
+    });
+
+    // Wrap date inputs with a professional styled calendar icon
+    $('input[type="date"]').each(function() {
+        var $input = $(this);
+        if ($input.parent().hasClass('date-input-wrapper')) return; // already wrapped
+        $input.wrap('<div class="date-input-wrapper"></div>');
+        $input.after('<i class="fas fa-calendar-alt date-cal-icon" aria-hidden="true"></i>');
     });
 });
 

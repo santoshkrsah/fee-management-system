@@ -9,10 +9,11 @@ RewriteRule ^(.*)$ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
     Deny from all
 </FilesMatch>
 
-# Block access to config and backups directories from web
+# Block access to config, backups, and database directories from web
 <IfModule mod_rewrite.c>
     RewriteRule ^config/ - [F,L]
     RewriteRule ^backups/ - [F,L]
+    RewriteRule ^database/ - [F,L]
 </IfModule>
 
 # Block utility/dev scripts

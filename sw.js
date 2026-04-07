@@ -1,187 +1,104 @@
 /**
  * Service Worker for Fee Management System
- * Enables offline functionality and performance optimization
+ *
+ * CACHING STRATEGY:
+ *  - Static assets (CSS/JS/fonts from CDN and local):  Cache-first, background update
+ *  - PHP pages & AJAX requests:                        Network-only, NEVER cached
+ *
+ * WHY: PHP pages are session-dependent. Caching them causes the service worker
+ * to serve a stale/login-page response for authenticated URLs, making every
+ * page click appear to log the user out.
  */
 
-const CACHE_NAME = 'fee-management-v1.0';
-const OFFLINE_URL = '/admin/login.php';
+const CACHE_NAME = 'fee-management-static-v2';
 
-// Files to cache for offline functionality
-const CACHE_URLS = [
-  '/admin/login.php',
-  '/admin/dashboard.php',
+// Only static, session-independent assets are cached
+const STATIC_CACHE_URLS = [
   '/assets/css/style.css',
+  '/assets/css/student.css',
+  '/assets/js/script.js',
+  '/assets/js/qrcode.min.js',
   'https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css',
-  'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css',
-  'https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js'
+  'https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js',
+  'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css'
 ];
 
-// Install event - cache essential files
+// ── Install ──────────────────────────────────────────────────────────────────
 self.addEventListener('install', (event) => {
-  console.log('[Service Worker] Installing...');
-
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) => {
-      console.log('[Service Worker] Caching app shell');
-      return cache.addAll(CACHE_URLS).catch((error) => {
-        console.log('[Service Worker] Cache failed:', error);
-        // Continue even if some resources fail to cache
+      return cache.addAll(STATIC_CACHE_URLS).catch(() => {
+        // Non-fatal: continue even if some CDN assets fail to pre-cache
         return Promise.resolve();
       });
     })
   );
-
-  // Force the waiting service worker to become the active service worker
   self.skipWaiting();
 });
 
-// Activate event - clean up old caches
+// ── Activate: remove all old caches ──────────────────────────────────────────
 self.addEventListener('activate', (event) => {
-  console.log('[Service Worker] Activating...');
-
   event.waitUntil(
-    caches.keys().then((cacheNames) => {
-      return Promise.all(
-        cacheNames.map((cacheName) => {
-          if (cacheName !== CACHE_NAME) {
-            console.log('[Service Worker] Deleting old cache:', cacheName);
-            return caches.delete(cacheName);
-          }
-        })
-      );
-    })
+    caches.keys().then((names) =>
+      Promise.all(
+        names
+          .filter((name) => name !== CACHE_NAME)
+          .map((name) => caches.delete(name))
+      )
+    )
   );
-
-  // Take control of all pages immediately
   return self.clients.claim();
 });
 
-// Fetch event - serve from cache, fallback to network
+// ── Fetch: route by request type ─────────────────────────────────────────────
 self.addEventListener('fetch', (event) => {
-  // Skip non-GET requests
-  if (event.request.method !== 'GET') {
+  const url = new URL(event.request.url);
+
+  // 1. Only handle http(s)
+  if (!url.protocol.startsWith('http')) return;
+
+  // 2. PHP pages and AJAX → always network, never cache
+  //    This covers every .php file, query strings, and POST requests
+  if (
+    event.request.method !== 'GET' ||
+    url.pathname.endsWith('.php') ||
+    url.search !== ''
+  ) {
+    // Let the browser handle it normally (no respondWith = pass-through)
     return;
   }
 
-  // Skip chrome-extension and other non-http(s) requests
-  if (!event.request.url.startsWith('http')) {
-    return;
-  }
-
+  // 3. Static assets → cache-first, background refresh
   event.respondWith(
-    caches.match(event.request).then((cachedResponse) => {
-      // Return cached version if available
-      if (cachedResponse) {
-        // Update cache in background
-        fetch(event.request).then((response) => {
-          if (response && response.status === 200) {
+    caches.match(event.request).then((cached) => {
+      // Kick off a background network request to keep the cache fresh
+      const networkFetch = fetch(event.request)
+        .then((response) => {
+          if (response && response.status === 200 && response.type !== 'opaque') {
             caches.open(CACHE_NAME).then((cache) => {
               cache.put(event.request, response.clone());
             });
           }
-        }).catch(() => {
-          // Network failed, but we have cached version
-        });
-
-        return cachedResponse;
-      }
-
-      // Not in cache, fetch from network
-      return fetch(event.request).then((response) => {
-        // Don't cache if not a valid response
-        if (!response || response.status !== 200 || response.type === 'error') {
           return response;
-        }
+        })
+        .catch(() => null);
 
-        // Clone the response
-        const responseToCache = response.clone();
-
-        // Cache the fetched response
-        caches.open(CACHE_NAME).then((cache) => {
-          // Only cache GET requests
-          if (event.request.method === 'GET') {
-            cache.put(event.request, responseToCache);
-          }
-        });
-
-        return response;
-      }).catch((error) => {
-        console.log('[Service Worker] Fetch failed:', error);
-
-        // If offline and requesting a page, show offline page
-        if (event.request.destination === 'document') {
-          return caches.match(OFFLINE_URL);
-        }
-
-        return new Response('Network error happened', {
-          status: 408,
-          headers: { 'Content-Type': 'text/plain' },
-        });
-      });
+      // Return cache immediately if available, otherwise wait for network
+      return cached || networkFetch;
     })
   );
 });
 
-// Background sync event (for future enhancement)
-self.addEventListener('sync', (event) => {
-  console.log('[Service Worker] Background sync:', event.tag);
-
-  if (event.tag === 'sync-data') {
+// ── Handle messages from the page (e.g. cache-busting on logout) ─────────────
+self.addEventListener('message', (event) => {
+  if (event.data && event.data.action === 'clearCache') {
     event.waitUntil(
-      // Add your background sync logic here
-      Promise.resolve()
+      caches.keys().then((names) =>
+        Promise.all(names.map((name) => caches.delete(name)))
+      )
     );
   }
-});
-
-// Push notification event (for future enhancement)
-self.addEventListener('push', (event) => {
-  console.log('[Service Worker] Push received:', event);
-
-  const options = {
-    body: event.data ? event.data.text() : 'New notification',
-    icon: '/assets/images/icon-192x192.png',
-    badge: '/assets/images/icon-72x72.png',
-    vibrate: [200, 100, 200],
-    data: {
-      dateOfArrival: Date.now(),
-      primaryKey: 1
-    }
-  };
-
-  event.waitUntil(
-    self.registration.showNotification('Fee Management System', options)
-  );
-});
-
-// Notification click event
-self.addEventListener('notificationclick', (event) => {
-  console.log('[Service Worker] Notification clicked:', event);
-
-  event.notification.close();
-
-  event.waitUntil(
-    clients.openWindow('/admin/dashboard.php')
-  );
-});
-
-// Message event - handle messages from clients
-self.addEventListener('message', (event) => {
-  console.log('[Service Worker] Message received:', event.data);
-
-  if (event.data.action === 'skipWaiting') {
+  if (event.data && event.data.action === 'skipWaiting') {
     self.skipWaiting();
   }
-
-  if (event.data.action === 'clearCache') {
-    event.waitUntil(
-      caches.keys().then((cacheNames) => {
-        return Promise.all(
-          cacheNames.map((cacheName) => caches.delete(cacheName))
-        );
-      })
-    );
-  }
 });
-
-console.log('[Service Worker] Loaded successfully');

@@ -4,6 +4,7 @@
  */
 require_once '../../config/database.php';
 require_once '../../includes/session.php';
+require_once '../../includes/fee_type_helper.php';
 
 requireLogin();
 
@@ -15,6 +16,15 @@ $db = getDB();
 $currentYear = getSelectedSession();
 $feeMode = getFeeMode();
 $academicMonths = getAcademicMonths();
+
+// Load all active fee types; build lookup keyed by column_name
+$allActiveFeeTypes = getAllFeeTypes(); // returns only is_active = 1
+$activeFeeTypeMap  = array_column($allActiveFeeTypes, null, 'column_name');
+
+// Custom (non-system) active fee types for dynamic rendering
+$customFeeTypes = array_values(array_filter($allActiveFeeTypes, function($t) {
+    return !$t['is_system_defined'];
+}));
 
 // Fetch students for selected session
 $students = $db->fetchAll("
@@ -36,18 +46,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $student_id = (int)$_POST['student_id'];
         $fee_structure_id = !empty($_POST['fee_structure_id']) ? (int)$_POST['fee_structure_id'] : null;
         $payment_date = sanitize($_POST['payment_date']);
-        $tuition_fee_paid = (float)$_POST['tuition_fee_paid'];
-        $exam_fee_paid = (float)$_POST['exam_fee_paid'];
-        $library_fee_paid = (float)$_POST['library_fee_paid'];
-        $sports_fee_paid = (float)$_POST['sports_fee_paid'];
-        $lab_fee_paid = (float)$_POST['lab_fee_paid'];
-        $transport_fee_paid = (float)$_POST['transport_fee_paid'];
-        $other_charges_paid = (float)$_POST['other_charges_paid'];
+        $tuition_fee_paid   = (float)($_POST['tuition_fee_paid']   ?? 0);
+        $exam_fee_paid      = (float)($_POST['exam_fee_paid']      ?? 0);
+        $library_fee_paid   = (float)($_POST['library_fee_paid']   ?? 0);
+        $sports_fee_paid    = (float)($_POST['sports_fee_paid']    ?? 0);
+        $lab_fee_paid       = (float)($_POST['lab_fee_paid']       ?? 0);
+        $transport_fee_paid = (float)($_POST['transport_fee_paid'] ?? 0);
+        $other_charges_paid = (float)($_POST['other_charges_paid'] ?? 0);
         $fine = (float)($_POST['fine'] ?? 0);
         $discount = (float)($_POST['discount'] ?? 0);
         $payment_mode = sanitize($_POST['payment_mode']);
         $transaction_id = sanitize($_POST['transaction_id'] ?? '');
         $remarks = sanitize($_POST['remarks'] ?? '');
+
+        // Collect custom fee type amounts dynamically
+        $customFeeAmounts = [];
+        foreach ($customFeeTypes as $ft) {
+            $colPaid = $ft['column_name'] . '_paid';
+            $customFeeAmounts[$colPaid] = (float)($_POST[$colPaid] ?? 0);
+        }
 
         // Validate common required fields
         if (empty($student_id) || empty($payment_date) || empty($payment_mode)) {
@@ -86,22 +103,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $receipt_no = generateReceiptNo() . '-' . rand(10, 99);
         }
 
+        // Build dynamic column/value/param strings for custom fee types
+        $customColsSql = '';
+        $customValsSql = '';
+        foreach ($customFeeTypes as $ft) {
+            $customColsSql .= ", `{$ft['column_name']}_paid`";
+            $customValsSql .= ", :{$ft['column_name']}_paid";
+        }
+
         // Insert payment record
         $query = "INSERT INTO fee_collection (
             receipt_no, student_id, academic_year, fee_structure_id, payment_date,
             tuition_fee_paid, exam_fee_paid, library_fee_paid, sports_fee_paid,
-            lab_fee_paid, transport_fee_paid, other_charges_paid, fine, discount,
+            lab_fee_paid, transport_fee_paid, other_charges_paid{$customColsSql}, fine, discount,
             payment_mode, transaction_id, remarks, collected_by,
             fee_month, monthly_fee_structure_id
         ) VALUES (
             :receipt_no, :student_id, :academic_year, :fee_structure_id, :payment_date,
             :tuition_fee_paid, :exam_fee_paid, :library_fee_paid, :sports_fee_paid,
-            :lab_fee_paid, :transport_fee_paid, :other_charges_paid, :fine, :discount,
+            :lab_fee_paid, :transport_fee_paid, :other_charges_paid{$customValsSql}, :fine, :discount,
             :payment_mode, :transaction_id, :remarks, :collected_by,
             :fee_month, :monthly_fee_structure_id
         )";
 
-        $db->query($query, [
+        $db->query($query, array_merge([
             'receipt_no' => $receipt_no,
             'student_id' => $student_id,
             'academic_year' => $currentYear,
@@ -122,7 +147,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'collected_by' => getAdminId(),
             'fee_month' => $fee_month,
             'monthly_fee_structure_id' => $monthly_fee_structure_id
-        ]);
+        ], $customFeeAmounts));
 
         $payment_id = $db->lastInsertId();
 
@@ -224,7 +249,7 @@ require_once '../../includes/header.php';
 
                         <div class="col-md-6 mb-3">
                             <label class="form-label-custom">Payment Mode <span class="text-danger">*</span></label>
-                            <select name="payment_mode" class="form-control form-control-custom" required>
+                            <select name="payment_mode" id="payment_mode" class="form-control form-control-custom" required>
                                 <option value="">Select Mode</option>
                                 <option value="Cash">Cash</option>
                                 <option value="Card">Card</option>
@@ -232,6 +257,7 @@ require_once '../../includes/header.php';
                                 <option value="Net Banking">Net Banking</option>
                                 <option value="Cheque">Cheque</option>
                             </select>
+                            <div id="paymentModeError" class="invalid-feedback">Please select a Payment Mode.</div>
                         </div>
                     </div>
 
@@ -256,47 +282,72 @@ require_once '../../includes/header.php';
                     <h5 class="mb-3">Fee Details</h5>
 
                     <div class="row">
+                        <?php if (isset($activeFeeTypeMap['tuition_fee'])): ?>
                         <div class="col-md-3 mb-3">
-                            <label class="form-label-custom">Tuition Fee</label>
+                            <label class="form-label-custom"><?php echo htmlspecialchars($activeFeeTypeMap['tuition_fee']['label']); ?></label>
                             <input type="number" name="tuition_fee_paid" id="tuition_fee_paid"
-                                   class="form-control form-control-custom" step="0.01" min="0" value="0">
+                                   class="form-control form-control-custom fee-type-input" step="0.01" min="0" value="0">
                         </div>
+                        <?php endif; ?>
 
+                        <?php if (isset($activeFeeTypeMap['exam_fee'])): ?>
                         <div class="col-md-3 mb-3">
-                            <label class="form-label-custom">Exam Fee</label>
+                            <label class="form-label-custom"><?php echo htmlspecialchars($activeFeeTypeMap['exam_fee']['label']); ?></label>
                             <input type="number" name="exam_fee_paid" id="exam_fee_paid"
-                                   class="form-control form-control-custom" step="0.01" min="0" value="0">
+                                   class="form-control form-control-custom fee-type-input" step="0.01" min="0" value="0">
                         </div>
+                        <?php endif; ?>
 
+                        <?php if (isset($activeFeeTypeMap['library_fee'])): ?>
                         <div class="col-md-3 mb-3">
-                            <label class="form-label-custom">Library Fee</label>
+                            <label class="form-label-custom"><?php echo htmlspecialchars($activeFeeTypeMap['library_fee']['label']); ?></label>
                             <input type="number" name="library_fee_paid" id="library_fee_paid"
-                                   class="form-control form-control-custom" step="0.01" min="0" value="0">
+                                   class="form-control form-control-custom fee-type-input" step="0.01" min="0" value="0">
                         </div>
+                        <?php endif; ?>
 
+                        <?php if (isset($activeFeeTypeMap['sports_fee'])): ?>
                         <div class="col-md-3 mb-3">
-                            <label class="form-label-custom">Sports Fee</label>
+                            <label class="form-label-custom"><?php echo htmlspecialchars($activeFeeTypeMap['sports_fee']['label']); ?></label>
                             <input type="number" name="sports_fee_paid" id="sports_fee_paid"
-                                   class="form-control form-control-custom" step="0.01" min="0" value="0">
+                                   class="form-control form-control-custom fee-type-input" step="0.01" min="0" value="0">
                         </div>
+                        <?php endif; ?>
 
+                        <?php if (isset($activeFeeTypeMap['lab_fee'])): ?>
                         <div class="col-md-3 mb-3">
-                            <label class="form-label-custom">Lab Fee</label>
+                            <label class="form-label-custom"><?php echo htmlspecialchars($activeFeeTypeMap['lab_fee']['label']); ?></label>
                             <input type="number" name="lab_fee_paid" id="lab_fee_paid"
-                                   class="form-control form-control-custom" step="0.01" min="0" value="0">
+                                   class="form-control form-control-custom fee-type-input" step="0.01" min="0" value="0">
                         </div>
+                        <?php endif; ?>
 
+                        <?php if (isset($activeFeeTypeMap['transport_fee'])): ?>
                         <div class="col-md-3 mb-3">
-                            <label class="form-label-custom">Transport Fee</label>
+                            <label class="form-label-custom"><?php echo htmlspecialchars($activeFeeTypeMap['transport_fee']['label']); ?></label>
                             <input type="number" name="transport_fee_paid" id="transport_fee_paid"
-                                   class="form-control form-control-custom" step="0.01" min="0" value="0">
+                                   class="form-control form-control-custom fee-type-input" step="0.01" min="0" value="0">
                         </div>
+                        <?php endif; ?>
 
+                        <?php if (isset($activeFeeTypeMap['other_charges'])): ?>
                         <div class="col-md-3 mb-3">
-                            <label class="form-label-custom">Other Charges</label>
+                            <label class="form-label-custom"><?php echo htmlspecialchars($activeFeeTypeMap['other_charges']['label']); ?></label>
                             <input type="number" name="other_charges_paid" id="other_charges_paid"
-                                   class="form-control form-control-custom" step="0.01" min="0" value="0">
+                                   class="form-control form-control-custom fee-type-input" step="0.01" min="0" value="0">
                         </div>
+                        <?php endif; ?>
+
+                        <?php foreach ($customFeeTypes as $ft): ?>
+                        <div class="col-md-3 mb-3">
+                            <label class="form-label-custom"><?php echo htmlspecialchars($ft['label']); ?></label>
+                            <input type="number"
+                                   name="<?php echo $ft['column_name']; ?>_paid"
+                                   id="<?php echo $ft['column_name']; ?>_paid"
+                                   class="form-control form-control-custom fee-type-input"
+                                   step="0.01" min="0" value="0">
+                        </div>
+                        <?php endforeach; ?>
 
                         <div class="col-md-3 mb-3">
                             <label class="form-label-custom">Fine (if any)</label>
@@ -373,10 +424,12 @@ require_once '../../includes/header.php';
                         <strong>Fee Breakdown</strong>
                     </div>
                     <div class="card-body">
+                        <div class="table-responsive">
                         <table class="table table-sm mb-0">
                             <tbody id="feeBreakdownTable">
                             </tbody>
                         </table>
+                        </div>
                     </div>
                 </div>
 
@@ -399,7 +452,30 @@ require_once '../../includes/header.php';
 </div>
 
 <script>
+// PHP-generated custom fee types for JS
+var customFeeTypes = <?php echo json_encode(array_map(function($t) {
+    return ['column_name' => $t['column_name'], 'label' => $t['label']];
+}, $customFeeTypes)); ?>;
+
 $(document).ready(function() {
+
+    // ── Calculate total fee ────────────────────────────────────────────────────
+    function calculateTotalFee() {
+        var total = 0;
+        $('.fee-type-input').each(function() {
+            total += parseFloat($(this).val() || 0);
+        });
+        total += parseFloat($('#fine').val() || 0);
+        total -= parseFloat($('#discount').val() || 0);
+        if (total < 0) total = 0;
+        $('#total_paid').val(total.toFixed(2));
+    }
+
+    // Auto-recalculate whenever any fee input changes
+    $(document).on('input', '.fee-type-input, #fine, #discount', function() {
+        calculateTotalFee();
+    });
+
     // Student data from PHP
     var allStudents = [
         <?php foreach($students as $student): ?>
@@ -522,14 +598,18 @@ $(document).ready(function() {
                         return m.fee_month == feeMonth;
                     });
                     if (monthData) {
-                        $('#tuition_fee_paid').val(monthData.tuition_fee);
-                        $('#exam_fee_paid').val(monthData.exam_fee);
-                        $('#library_fee_paid').val(monthData.library_fee);
-                        $('#sports_fee_paid').val(monthData.sports_fee);
-                        $('#lab_fee_paid').val(monthData.lab_fee);
-                        $('#transport_fee_paid').val(monthData.transport_fee);
-                        $('#other_charges_paid').val(monthData.other_charges);
+                        $('#tuition_fee_paid').val(monthData.tuition_fee || 0);
+                        $('#exam_fee_paid').val(monthData.exam_fee || 0);
+                        $('#library_fee_paid').val(monthData.library_fee || 0);
+                        $('#sports_fee_paid').val(monthData.sports_fee || 0);
+                        $('#lab_fee_paid').val(monthData.lab_fee || 0);
+                        $('#transport_fee_paid').val(monthData.transport_fee || 0);
+                        $('#other_charges_paid').val(monthData.other_charges || 0);
                         $('#monthly_fee_structure_id').val(monthData.monthly_fee_id);
+                        // Populate custom fee types from monthly structure
+                        customFeeTypes.forEach(function(ft) {
+                            $('#' + ft.column_name + '_paid').val(monthData[ft.column_name] || 0);
+                        });
                         calculateTotalFee();
                     } else {
                         alert('Monthly fee structure not defined for this month. Please set it up first.');
@@ -552,6 +632,12 @@ $(document).ready(function() {
         $('#lab_fee_paid').val(0);
         $('#transport_fee_paid').val(0);
         $('#other_charges_paid').val(0);
+        // Clear custom fee type fields
+        customFeeTypes.forEach(function(ft) {
+            $('#' + ft.column_name + '_paid').val(0);
+        });
+        $('#fine').val(0);
+        $('#discount').val(0);
         $('#total_paid').val(0);
         $('#student_search').val('').focus();
     });
@@ -565,15 +651,18 @@ $(document).ready(function() {
             success: function(response) {
                 if (response.success) {
                     const fee = response.fee_structure;
-                    $('#tuition_fee_paid').val(fee.tuition_fee);
-                    $('#exam_fee_paid').val(fee.exam_fee);
-                    $('#library_fee_paid').val(fee.library_fee);
-                    $('#sports_fee_paid').val(fee.sports_fee);
-                    $('#lab_fee_paid').val(fee.lab_fee);
-                    $('#transport_fee_paid').val(fee.transport_fee);
-                    $('#other_charges_paid').val(fee.other_charges);
+                    $('#tuition_fee_paid').val(fee.tuition_fee || 0);
+                    $('#exam_fee_paid').val(fee.exam_fee || 0);
+                    $('#library_fee_paid').val(fee.library_fee || 0);
+                    $('#sports_fee_paid').val(fee.sports_fee || 0);
+                    $('#lab_fee_paid').val(fee.lab_fee || 0);
+                    $('#transport_fee_paid').val(fee.transport_fee || 0);
+                    $('#other_charges_paid').val(fee.other_charges || 0);
                     $('#fee_structure_id').val(fee.fee_structure_id);
-
+                    // Populate custom fee types from fee structure
+                    customFeeTypes.forEach(function(ft) {
+                        $('#' + ft.column_name + '_paid').val(fee[ft.column_name] || 0);
+                    });
                     calculateTotalFee();
                 } else {
                     alert('Fee structure not found for this class. Please contact administrator.');
@@ -591,6 +680,12 @@ $(document).ready(function() {
         if (!studentId || studentId === '') {
             e.preventDefault();
             alert('Please search and select a student first.');
+            return false;
+        }
+        // Payment mode inline validation
+        if (!$('#payment_mode').val()) {
+            e.preventDefault();
+            $('#payment_mode').addClass('is-invalid').focus();
             return false;
         }
         <?php if ($feeMode === 'annual'): ?>
@@ -616,16 +711,47 @@ $(document).ready(function() {
         <?php endif; ?>
     });
 
+    // Clear payment mode inline error when user makes a selection
+    $('#payment_mode').on('change', function() {
+        $(this).removeClass('is-invalid');
+    });
+
     // Review Total Amount button
     $('#reviewTotalBtn').on('click', function() {
         calculateTotalFee();
 
-        // Check if student is selected
+        // 1. Check student selected
         var studentId = $('#student_id').val();
         if (!studentId || studentId === '') {
             alert('Please search and select a student first.');
             return;
         }
+
+        // 2. Payment mode — inline error below dropdown
+        if (!$('#payment_mode').val()) {
+            $('#payment_mode').addClass('is-invalid').focus();
+            return;
+        }
+
+        // 3. Fee structure checks — same as Collect Fee button
+        <?php if ($feeMode === 'annual'): ?>
+        var feeStructureId = $('#fee_structure_id').val();
+        if (!feeStructureId || feeStructureId === '' || feeStructureId === '0') {
+            alert('Fee structure not loaded. Please select a student again.');
+            return;
+        }
+        <?php else: ?>
+        var feeMonth = $('#fee_month').val();
+        if (!feeMonth || feeMonth === '') {
+            alert('Please select a fee month.');
+            return;
+        }
+        var monthlyFsId = $('#monthly_fee_structure_id').val();
+        if (!monthlyFsId || monthlyFsId === '' || monthlyFsId === '0') {
+            alert('Monthly fee structure not loaded. Please select a month.');
+            return;
+        }
+        <?php endif; ?>
 
         // Build fee breakdown table
         var breakdownHtml = '';
@@ -639,10 +765,15 @@ $(document).ready(function() {
             { name: 'Other Charges', id: 'other_charges_paid' }
         ];
 
+        // Append custom fee types to breakdown list
+        customFeeTypes.forEach(function(ft) {
+            feeItems.push({ name: ft.label, id: ft.column_name + '_paid' });
+        });
+
         feeItems.forEach(function(item) {
             var amount = parseFloat($('#' + item.id).val() || 0);
             if (amount > 0) {
-                breakdownHtml += '<tr><td class="text-start">' + item.name + '</td>';
+                breakdownHtml += '<tr><td class="text-start">' + escapeHtml(item.name) + '</td>';
                 breakdownHtml += '<td class="text-end"><strong>₹ ' + amount.toFixed(2) + '</strong></td></tr>';
             }
         });

@@ -11,6 +11,13 @@ $pageTitle = 'View Payments';
 
 $feeMode = getFeeMode();
 $academicMonths = getAcademicMonths();
+$selectedSession = getSelectedSession();
+
+// Month filter (monthly mode only; consolidated = no month filter)
+$selectedMonthFilter = '';
+if ($feeMode === 'monthly' && isset($_GET['month']) && $_GET['month'] !== '' && $_GET['month'] !== 'consolidated') {
+    $selectedMonthFilter = (int)$_GET['month'];
+}
 
 // Filters
 $search = sanitize($_GET['search'] ?? '');
@@ -28,6 +35,16 @@ try {
     // Build WHERE clause (shared by COUNT, SUM, and SELECT)
     $where = " WHERE 1=1";
     $params = [];
+
+    // Always filter by selected academic year
+    $where .= " AND fc.academic_year = :session";
+    $params['session'] = $selectedSession;
+
+    // In monthly mode with a specific month selected, filter by fee_month
+    if ($feeMode === 'monthly' && $selectedMonthFilter !== '') {
+        $where .= " AND fc.fee_month = :fee_month";
+        $params['fee_month'] = $selectedMonthFilter;
+    }
 
     if (!empty($search)) {
         $where .= " AND (
@@ -129,6 +146,9 @@ require_once '../../includes/header.php';
         <div class="card card-custom">
             <div class="card-body">
                 <form method="GET" action="" class="row g-3">
+                    <?php if ($feeMode === 'monthly' && isset($_GET['month'])): ?>
+                    <input type="hidden" name="month" value="<?php echo htmlspecialchars($_GET['month']); ?>">
+                    <?php endif; ?>
                     <div class="col-md-4">
                         <label class="form-label-custom">Search</label>
                         <input type="text" name="search" class="form-control form-control-custom"
@@ -169,9 +189,14 @@ require_once '../../includes/header.php';
 <div class="row">
     <div class="col-12">
         <div class="card card-custom">
-            <div class="card-header d-flex justify-content-between align-items-center">
+            <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
                 <span>
                     <i class="fas fa-list"></i> Total Payments: <?php echo $totalPayments; ?>
+                    <?php if ($feeMode === 'monthly' && $selectedMonthFilter !== ''): ?>
+                        <small class="text-muted ms-1">(<?php echo htmlspecialchars($academicMonths[$selectedMonthFilter] ?? ''); ?>)</small>
+                    <?php elseif ($feeMode === 'monthly'): ?>
+                        <small class="text-muted ms-1">(All Months)</small>
+                    <?php endif; ?>
                     <?php if ($totalPayments > 0): ?>
                         <small class="text-muted ms-2">(Showing <?php echo $showingFrom; ?>-<?php echo $showingTo; ?>)</small>
                     <?php endif; ?>

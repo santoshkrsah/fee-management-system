@@ -8,9 +8,9 @@
 // HOSTINGER: Update these values with your hPanel MySQL database credentials
 define('DB_HOST', 'localhost');
 define('DB_PORT', '3306');
-define('DB_NAME', 'u638211070_demo_fms');
-define('DB_USER', 'u638211070_demo_fms');
-define('DB_PASS', 'Te@5219981998');
+define('DB_NAME', 'fee_management_system');
+define('DB_USER', 'root');
+define('DB_PASS', '');
 define('DB_CHARSET', 'utf8mb4');
 
 /**
@@ -80,8 +80,8 @@ class Database {
             $stmt->execute($params);
             return $stmt;
         } catch(PDOException $e) {
-            error_log("Query Error: " . $e->getMessage());
-            throw new Exception("Database query failed");
+            error_log("Query Error: " . $e->getMessage() . " | SQL: " . substr($query, 0, 200));
+            throw new Exception($e->getMessage());
         }
     }
 

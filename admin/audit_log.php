@@ -85,7 +85,7 @@ include '../includes/header.php';
 ?>
 
 <div class="container-fluid">
-    <div class="d-flex justify-content-between align-items-center mb-4">
+    <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-4">
         <h2>
             <i class="fas fa-clipboard-list"></i> Audit Log
             <span class="badge bg-secondary"><?= number_format($totalRecords) ?> entries</span>

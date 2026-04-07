@@ -20,11 +20,11 @@
     position: absolute;
     width: 500px;
     height: 500px;
-    background: rgba(255, 255, 255, 0.1);
+    background: radial-gradient(circle, rgba(255,255,255,0.15) 0%, transparent 70%);
     border-radius: 50%;
-    top: -250px;
-    right: -250px;
-    animation: float 6s ease-in-out infinite;
+    top: -200px;
+    right: -150px;
+    animation: loginOrb1 12s ease-in-out infinite;
 }
 
 .student-login-container::after {
@@ -32,11 +32,15 @@
     position: absolute;
     width: 400px;
     height: 400px;
-    background: rgba(255, 255, 255, 0.1);
+    background: radial-gradient(circle, rgba(255,255,255,0.12) 0%, transparent 70%);
     border-radius: 50%;
-    bottom: -200px;
-    left: -200px;
-    animation: float 8s ease-in-out infinite reverse;
+    bottom: -150px;
+    left: -100px;
+    animation: loginOrb2 15s ease-in-out infinite;
+}
+
+.student-login-container .login-card {
+    box-shadow: 0 25px 60px rgba(0, 0, 0, 0.3), 0 0 40px rgba(16, 185, 129, 0.15);
 }
 
 .student-login-container .login-header {
@@ -206,6 +210,92 @@
 @media (max-width: 768px) {
     .student-detail-grid {
         grid-template-columns: 1fr;
+    }
+
+    .student-detail-grid .detail-label {
+        min-width: 120px;
+    }
+}
+
+/* Student login responsive */
+@media (max-width: 576px) {
+    .student-login-container {
+        padding: 1rem;
+    }
+
+    .student-login-container::before {
+        width: 250px;
+        height: 250px;
+        top: -100px;
+        right: -80px;
+    }
+
+    .student-login-container::after {
+        width: 200px;
+        height: 200px;
+        bottom: -80px;
+        left: -60px;
+    }
+
+    .student-portal-label {
+        font-size: 0.55rem;
+        padding: 0.05rem 0.35rem;
+        margin-left: 0.25rem;
+    }
+
+    .password-change-banner {
+        padding: 0.75rem 1rem;
+        flex-direction: column;
+        text-align: center;
+        gap: 0.5rem;
+    }
+
+    .student-fee-card .fee-amount {
+        font-size: 1.35rem;
+    }
+
+    .student-detail-grid .detail-item {
+        flex-direction: column;
+        gap: 0.15rem;
+    }
+
+    .student-detail-grid .detail-label {
+        min-width: unset;
+        font-size: 0.78rem;
+    }
+
+    .student-detail-grid .detail-value {
+        font-size: 0.85rem;
+    }
+
+    .captcha-question {
+        font-size: 1rem;
+        padding: 0.35rem 0.75rem;
+    }
+
+    .fee-status-paid,
+    .fee-status-partial,
+    .fee-status-unpaid {
+        font-size: 0.7rem;
+        padding: 0.2rem 0.5rem;
+    }
+}
+
+@media (max-width: 400px) {
+    .student-fee-card .fee-amount {
+        font-size: 1.15rem;
+    }
+
+    .student-detail-grid .detail-label {
+        font-size: 0.72rem;
+    }
+
+    .student-detail-grid .detail-value {
+        font-size: 0.8rem;
+    }
+
+    .student-portal-label {
+        display: none;
     }
 }
 

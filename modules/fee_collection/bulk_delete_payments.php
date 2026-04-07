@@ -42,6 +42,13 @@ try {
     }
     $in = implode(',', $placeholders);
 
+    // Clear references in upi_payments before deleting (handles cases where
+    // ON DELETE SET NULL FK constraint may not exist in older DB setups)
+    $db->query(
+        "UPDATE upi_payments SET payment_id = NULL WHERE payment_id IN ($in)",
+        $params
+    );
+
     // Hard delete payment records
     $db->query(
         "DELETE FROM fee_collection WHERE payment_id IN ($in)",

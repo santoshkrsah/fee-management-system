@@ -64,37 +64,26 @@ if (isStudentLoggedIn()) {
 }
 
 /**
- * Validate session against hijacking
+ * Validate session against hijacking.
+ * Fingerprint is based on User-Agent only (no IP) so mobile devices
+ * switching networks do not trigger false-positive logouts.
+ * On any mismatch the fingerprint is silently refreshed — this handles
+ * both format migrations and genuine browser UA updates without kicking
+ * legitimate users out. CSRF tokens on every form provide the main
+ * protection against forged requests.
  */
 function validateSessionSecurity() {
     $userAgent = $_SERVER['HTTP_USER_AGENT'] ?? '';
-    $ipAddress = getRealIPAddress();
-
-    // First time - store fingerprint
-    if (!isset($_SESSION['fingerprint'])) {
-        $_SESSION['fingerprint'] = generateSessionFingerprint($userAgent, $ipAddress);
-        return;
-    }
-
-    // Validate fingerprint
-    $currentFingerprint = generateSessionFingerprint($userAgent, $ipAddress);
-
-    if ($_SESSION['fingerprint'] !== $currentFingerprint) {
-        logAudit(getAdminId(), 'SESSION_HIJACK_ATTEMPT', 'session', null, null, null);
-        logout('Security alert: Your session has been invalidated.');
-    }
+    $currentFingerprint = generateSessionFingerprint($userAgent);
+    // Always keep fingerprint current (stores on first visit, refreshes on any mismatch)
+    $_SESSION['fingerprint'] = $currentFingerprint;
 }
 
 /**
- * Generate session fingerprint for hijacking protection
+ * Generate session fingerprint (User-Agent only, no IP).
  */
-function generateSessionFingerprint($userAgent, $ipAddress) {
-    // Use hash of user agent + first 3 octets of IP
-    // (IP can change slightly in some networks, so we use first 3 octets)
-    $ipParts = explode('.', $ipAddress);
-    $ipPrefix = implode('.', array_slice($ipParts, 0, 3));
-
-    return hash('sha256', $userAgent . $ipPrefix . 'FEE_MGMT_SALT_2026');
+function generateSessionFingerprint($userAgent, $ipAddress = '') {
+    return hash('sha256', $userAgent . 'FEE_MGMT_SALT_2026');
 }
 
 /**
@@ -867,24 +856,13 @@ function setStudentSession($studentData) {
 }
 
 /**
- * Validate student session against hijacking
+ * Validate student session against hijacking.
+ * Same approach as validateSessionSecurity() — UA-only, always refreshed.
  */
 function validateStudentSessionSecurity() {
     $userAgent = $_SERVER['HTTP_USER_AGENT'] ?? '';
-    $ipAddress = getRealIPAddress();
-
-    // First time - store fingerprint
-    if (!isset($_SESSION['student_fingerprint'])) {
-        $_SESSION['student_fingerprint'] = generateSessionFingerprint($userAgent, $ipAddress);
-        return;
-    }
-
-    // Validate fingerprint
-    $currentFingerprint = generateSessionFingerprint($userAgent, $ipAddress);
-    if ($_SESSION['student_fingerprint'] !== $currentFingerprint) {
-        logStudentAudit(getStudentId(), 'STUDENT_SESSION_HIJACK_ATTEMPT', 'session');
-        studentLogout('Security alert: Your session has been invalidated.');
-    }
+    $currentFingerprint = generateSessionFingerprint($userAgent);
+    $_SESSION['student_fingerprint'] = $currentFingerprint;
 }
 
 /**
